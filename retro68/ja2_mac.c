@@ -45,7 +45,7 @@ static WindowPtr gWindow;
 static WindowPtr gDiagnosticsWindow;
 static Boolean gRunning = 1;
 static Boolean gMenuBackgroundLoaded = 0;
-static GWorldPtr gMenuWorld;
+static unsigned short *gMenuPixels;
 static short gMenuButton = -1;
 static char gDiagnosticsText[4096];
 static unsigned short gDiagnosticsLength;
@@ -257,16 +257,39 @@ static unsigned short ReadLittleEndian16(const unsigned char *bytes)
 
 static void BlitMenuBackground(void)
 {
-    Rect sourceBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
-    Rect destinationBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
+    PixMapHandle destinationPixMap;
+    unsigned short *destination;
+    long destinationRowBytes;
+    Point clientOrigin = { 0, 0 };
+    Rect destinationBounds;
+    long destinationX;
+    long destinationY;
+    short y;
 
-    if (gMenuWorld == NULL) {
+    if (gMenuPixels == NULL) {
         return;
     }
     SetPort(gWindow);
-    CopyBits((BitMap *)&(**GetGWorldPixMap(gMenuWorld)),
-             (BitMap *)&(**((CWindowPtr)gWindow)->portPixMap),
-             &sourceBounds, &destinationBounds, srcCopy, NULL);
+    LocalToGlobal(&clientOrigin);
+    destinationPixMap = ((CWindowPtr)gWindow)->portPixMap;
+    if (destinationPixMap == NULL || !LockPixels(destinationPixMap)) {
+        return;
+    }
+    destination = (unsigned short *)GetPixBaseAddr(destinationPixMap);
+    destinationRowBytes = (**destinationPixMap).rowBytes & 0x3fff;
+    destinationBounds = (**destinationPixMap).bounds;
+    destinationX = clientOrigin.h - destinationBounds.left;
+    destinationY = clientOrigin.v - destinationBounds.top;
+    if (destination != NULL && (**destinationPixMap).pixelSize == 16 &&
+        destinationX >= 0 && destinationY >= 0 &&
+        destinationX + JA2_SCREEN_WIDTH <= destinationBounds.right - destinationBounds.left &&
+        destinationY + JA2_SCREEN_HEIGHT <= destinationBounds.bottom - destinationBounds.top) {
+        for (y = 0; y < JA2_SCREEN_HEIGHT; ++y) {
+            memcpy(&destination[(destinationY + y) * (destinationRowBytes / 2) + destinationX],
+                   &gMenuPixels[(long)y * JA2_SCREEN_WIDTH], JA2_SCREEN_WIDTH * 2);
+        }
+    }
+    UnlockPixels(destinationPixMap);
 }
 
 static Boolean RenderMainMenuBackground(void)
@@ -289,8 +312,6 @@ static Boolean RenderMainMenuBackground(void)
     unsigned short run;
     unsigned char control;
     unsigned char *source;
-    RGBColor color;
-    QDErr worldError;
 
     DebugLog("Menu loader: opening LoadScreens.slf");
     archive = JA2SLFOpen("LoadScreens.slf");
@@ -356,20 +377,14 @@ static Boolean RenderMainMenuBackground(void)
     free(fileData);
 
     source = pixels + dataOffset;
-    if (gMenuWorld == NULL) {
-        Rect worldBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
-        DebugLog("Menu loader: creating 16-bit offscreen world");
-        worldError = NewGWorld(&gMenuWorld, 16, &worldBounds, NULL, NULL, 0);
-        if (worldError != noErr || gMenuWorld == NULL) {
-            DebugLog("Menu loader: 16-bit NewGWorld failed error=%d", worldError);
-            free(pixels);
-            return 0;
-        }
+    gMenuPixels = (unsigned short *)calloc(JA2_SCREEN_WIDTH * JA2_SCREEN_HEIGHT,
+                                           sizeof(unsigned short));
+    if (gMenuPixels == NULL) {
+        DebugLog("Menu loader: software framebuffer allocation failed");
+        free(pixels);
+        return 0;
     }
-
-    SetGWorld(gMenuWorld, NULL);
-    DebugLog("Rendering menu image offscreen %ux%u, ETRLE bytes=%lu",
-             width, height, dataLength);
+    DebugLog("Rendering menu into cached RGB555 framebuffer");
     for (y = 0; y < height; ++y) {
         x = 0;
         while (x < width && (unsigned long)(source - (pixels + dataOffset)) < dataLength) {
@@ -380,6 +395,8 @@ static Boolean RenderMainMenuBackground(void)
             run = (unsigned short)(control & 0x7f);
             if (run == 0 || x + run > width) {
                 DebugLog("Bad ETRLE run row=%u x=%u run=%u", y, x, run);
+                free(gMenuPixels);
+                gMenuPixels = NULL;
                 free(pixels);
                 return 0;
             }
@@ -388,10 +405,11 @@ static Boolean RenderMainMenuBackground(void)
             } else {
                 while (run-- != 0) {
                     unsigned short paletteIndex = *source++;
-                    color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
-                    color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
-                    color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
-                    SetCPixel((short)x, (short)y, &color);
+                    unsigned short red = (unsigned short)(palette[paletteIndex * 3] >> 3);
+                    unsigned short green = (unsigned short)(palette[paletteIndex * 3 + 1] >> 3);
+                    unsigned short blue = (unsigned short)(palette[paletteIndex * 3 + 2] >> 3);
+                    gMenuPixels[(long)y * JA2_SCREEN_WIDTH + x] =
+                        (unsigned short)((red << 10) | (green << 5) | blue);
                     ++x;
                 }
             }
@@ -653,8 +671,8 @@ int main(void)
     }
 
     window = gWindow;
-    if (gMenuWorld != NULL) {
-        DisposeGWorld(gMenuWorld);
+    if (gMenuPixels != NULL) {
+        free(gMenuPixels);
     }
     if (gDiagnosticsWindow != NULL) {
         DisposeWindow(gDiagnosticsWindow);
