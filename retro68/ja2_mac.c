@@ -46,6 +46,7 @@ static WindowPtr gDiagnosticsWindow;
 static Boolean gRunning = 1;
 static Boolean gMenuBackgroundLoaded = 0;
 static GWorldPtr gMenuWorld;
+static short gMenuButton = -1;
 static char gDiagnosticsText[4096];
 static unsigned short gDiagnosticsLength;
 
@@ -433,6 +434,54 @@ static void DrawDiagnostics(void)
     }
 }
 
+static void DrawMainMenu(void)
+{
+    static const char *labels[] = {
+        "Neues Spiel", "Spiel laden", "Optionen", "Beenden"
+    };
+    Rect button;
+    RGBColor border = { 0xd900, 0x9b00, 0x4500 };
+    RGBColor text = { 0xffff, 0xffff, 0xffff };
+    short index;
+
+    SetPort(gWindow);
+    TextFont(systemFont);
+    TextSize(13);
+    for (index = 0; index < 4; ++index) {
+        button.left = 205;
+        button.top = (short)(275 + index * 36);
+        button.right = 435;
+        button.bottom = (short)(302 + index * 36);
+        RGBForeColor(&border);
+        if (index == gMenuButton) {
+            PaintRoundRect(&button, 8, 8);
+            RGBForeColor(&text);
+        } else {
+            FrameRoundRect(&button, 8, 8);
+        }
+        DrawCString((short)(button.left + 18), (short)(button.top + 18), labels[index]);
+    }
+}
+
+static void HandleMainMenuClick(Point point)
+{
+    short index;
+
+    for (index = 0; index < 4; ++index) {
+        if (point.h >= 205 && point.h < 435 &&
+            point.v >= 275 + index * 36 && point.v < 302 + index * 36) {
+            gMenuButton = index;
+            if (index == 3) {
+                DebugLog("German main menu: quit selected");
+                gRunning = 0;
+            } else {
+                DebugLog("German main menu: button %d selected", index);
+            }
+            return;
+        }
+    }
+}
+
 static void DrawJA2Shell(void)
 {
     Rect bounds;
@@ -506,6 +555,10 @@ static void HandleJA2Event(const EventRecord *event)
             } else {
                 gRunning = 0;
             }
+        } else if (clicked == gWindow && part == inContent) {
+            Point point = event->where;
+            GlobalToLocal(&point);
+            HandleMainMenuClick(point);
         }
     } else if (event->what == updateEvt) {
         WindowPtr updatedWindow = (WindowPtr)event->message;
@@ -519,6 +572,8 @@ static void HandleJA2Event(const EventRecord *event)
             if (!RenderMainMenuBackground()) {
                 gMenuBackgroundLoaded = 0;
                 DrawJA2Shell();
+            } else {
+                DrawMainMenu();
             }
         } else {
             DrawJA2Shell();
@@ -575,6 +630,9 @@ int main(void)
     }
     DrawJA2Shell();
     gMenuBackgroundLoaded = RenderMainMenuBackground();
+    if (gMenuBackgroundLoaded) {
+        DrawMainMenu();
+    }
 
     while (gRunning) {
         if (WaitNextEvent(everyEvent, &event, 10, NULL)) {
