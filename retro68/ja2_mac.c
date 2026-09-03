@@ -586,6 +586,7 @@ int main(void)
 {
     EventRecord event;
     WindowPtr window;
+    OSErr depthError;
     Rect bounds = { 40, 40, 40 + JA2_SCREEN_HEIGHT, 40 + JA2_SCREEN_WIDTH };
     Rect diagnosticsBounds = { 80, 80, 320, 560 };
 
@@ -594,6 +595,9 @@ int main(void)
     InitWindows();
     InitMenus();
     InitCursor();
+
+    depthError = SetDepth(GetMainDevice(), 16, 0, 0);
+    DebugLog("Display depth request: 16-bit result=%d", depthError);
 
     gWindow = NewCWindow(NULL, &bounds, (ConstStr255Param) WINDOW_TITLE, 1,
                          documentProc, (WindowPtr)-1, 1, 0);
