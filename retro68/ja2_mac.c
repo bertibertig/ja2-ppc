@@ -265,7 +265,8 @@ static void BlitMenuBackground(void)
     }
     SetPort(gWindow);
     CopyBits((BitMap *)&(**GetGWorldPixMap(gMenuWorld)),
-             &gWindow->portBits, &sourceBounds, &destinationBounds,
+             &gWindow->portBits,
+             &sourceBounds, &destinationBounds,
              srcCopy, NULL);
 }
 
@@ -560,7 +561,9 @@ static void HandleJA2Event(const EventRecord *event)
         }
     } else if (event->what == mouseDown) {
         part = FindWindow(event->where, &clicked);
-        if (part == inGoAway && TrackGoAway(clicked, event->where)) {
+        if (part == inDrag) {
+            DragWindow(clicked, event->where, &qd.screenBits.bounds);
+        } else if (part == inGoAway && TrackGoAway(clicked, event->where)) {
             if (clicked == gDiagnosticsWindow) {
                 HideWindow(gDiagnosticsWindow);
             } else {
