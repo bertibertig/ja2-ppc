@@ -12,3 +12,11 @@ How to:
 
 Please note that it's preferable to open the source by opening the workspace in the Build directory
 If something's difficult to understand, find Digicrab (me) on the www.ja-galaxy-forum.com and ask nicely for help.  Bring cookies.
+
+Retro68 / classic Mac note
+--------------------------
+The original project is a Win32/DirectX VC6 build and is not source-portable
+to System 9 without replacing its platform layer. A native PowerPC QuickDraw
+platform shell and Retro68 build is in the retro68 directory. See
+retro68/README.md for the exact build command and the remaining migration
+boundary. The full game data files are not included in this source drop.
