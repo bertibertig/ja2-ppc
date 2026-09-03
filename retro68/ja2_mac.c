@@ -16,6 +16,8 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include "ja2_slf.h"
+
 #define JA2_SCREEN_WIDTH 640
 #define JA2_SCREEN_HEIGHT 480
 
@@ -261,7 +263,8 @@ static unsigned short ReadLittleEndian16(const unsigned char *bytes)
 
 static Boolean RenderMainMenuBackground(void)
 {
-    FILE *file;
+    JA2SLFArchive *archive;
+    unsigned char *fileData;
     unsigned char header[64];
     unsigned char palette[768];
     unsigned char object[16];
@@ -280,27 +283,27 @@ static Boolean RenderMainMenuBackground(void)
     unsigned char *source;
     RGBColor color;
 
-    if (!FindDataArchiveFile("LoadScreens.slf", "MAINMENUBACKGROUND.STI",
-                             &fileOffset, &fileLength)) {
+    archive = JA2SLFOpen("LoadScreens.slf");
+    if (archive == NULL || !JA2SLFFind(archive, "MAINMENUBACKGROUND.STI",
+                                       &fileOffset, &fileLength)) {
         DebugLog("Main menu entry not found");
+        JA2SLFClose(archive);
         return 0;
     }
-    file = fopen(":Data:LoadScreens.slf", "rb");
-    if (file == NULL) {
-        file = fopen("Data/LoadScreens.slf", "rb");
-    }
-    if (file == NULL || fileLength < 64 || fseek(file, (long)fileOffset, SEEK_SET) != 0 ||
-        fread(header, 1, sizeof(header), file) != sizeof(header)) {
+    fileData = (unsigned char *)malloc(fileLength);
+    if (fileData == NULL || fileLength < 64 ||
+        !JA2SLFRead(archive, fileOffset, fileData, fileLength)) {
         DebugLog("Failed reading menu entry at offset=%lu length=%lu", fileOffset, fileLength);
-        if (file != NULL) {
-            fclose(file);
-        }
+        free(fileData);
+        JA2SLFClose(archive);
         return 0;
     }
+    JA2SLFClose(archive);
+    memcpy(header, fileData, sizeof(header));
     if (memcmp(header, "STCI", 4) != 0 || !(ReadLittleEndian32(&header[16]) & 0x0008) ||
         !(ReadLittleEndian32(&header[16]) & 0x0020)) {
         DebugLog("Unsupported menu STCI flags=%08lx", ReadLittleEndian32(&header[16]));
-        fclose(file);
+        free(fileData);
         return 0;
     }
 
@@ -309,34 +312,33 @@ static Boolean RenderMainMenuBackground(void)
     height = ReadLittleEndian16(&header[20]);
     if (width == 0 || height == 0 || width > JA2_SCREEN_WIDTH ||
         height > JA2_SCREEN_HEIGHT || ReadLittleEndian32(&header[24]) != 256 ||
-        fread(palette, 1, sizeof(palette), file) != sizeof(palette) ||
-        fread(object, 1, sizeof(object), file) != sizeof(object)) {
+        fileLength < 64 + 768 + 16) {
         DebugLog("Invalid menu header width=%u height=%u colors=%lu", width, height,
                  ReadLittleEndian32(&header[24]));
-        fclose(file);
+        free(fileData);
         return 0;
     }
+    memcpy(palette, fileData + 64, sizeof(palette));
+    memcpy(object, fileData + 64 + 768, sizeof(object));
 
     dataOffset = ReadLittleEndian32(&object[0]);
     dataLength = ReadLittleEndian32(&object[4]);
     if (dataLength == 0 || dataLength > storedSize || dataOffset > storedSize ||
-        dataOffset + dataLength > storedSize) {
+        dataOffset + dataLength > storedSize ||
+        fileLength < 64 + 768 + 16 + storedSize) {
         DebugLog("Invalid menu object offset=%lu length=%lu stored=%lu", dataOffset,
                  dataLength, storedSize);
-        fclose(file);
+        free(fileData);
         return 0;
     }
     pixels = (unsigned char *)malloc(storedSize);
-    if (pixels == NULL || fseek(file, (long)(fileOffset + 64 + 768 + 16), SEEK_SET) != 0 ||
-        fread(pixels, 1, storedSize, file) != storedSize) {
+    if (pixels == NULL) {
         DebugLog("Unable to allocate/read menu pixels: %lu bytes", storedSize);
-        if (pixels != NULL) {
-            free(pixels);
-        }
-        fclose(file);
+        free(fileData);
         return 0;
     }
-    fclose(file);
+    memcpy(pixels, fileData + 64 + 768 + 16, storedSize);
+    free(fileData);
 
     source = pixels + dataOffset;
     if (gMenuWorld == NULL) {

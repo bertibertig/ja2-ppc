@@ -19,6 +19,8 @@ endif()
 
 add_application(JA2PPC
     ja2_mac.c
+    ja2_slf.c
+    ja2_slf.h
     ja2_mac.r
     CREATOR JA2P
 )
