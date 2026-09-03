@@ -272,7 +272,7 @@ static void BlitMenuBackground(void)
     }
     SetPort(gWindow);
     CopyBits((BitMap *)&(**GetGWorldPixMap(gMenuWorld)),
-             &((GrafPtr)gWindow)->portBits,
+             (BitMap *)&(**((CWindowPtr)gWindow)->portPixMap),
              &sourceBounds, &destinationBounds, srcCopy, NULL);
 }
 
