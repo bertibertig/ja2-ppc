@@ -55,6 +55,7 @@ JA2SLFArchive *JA2SLFOpen(const char *archiveName)
         char path[256];
         char lowerName[256];
         char upperName[256];
+        char titleName[256];
         unsigned short index;
 
         for (index = 0; archiveName[index] != 0 && index < sizeof(lowerName) - 1; ++index) {
@@ -63,6 +64,10 @@ JA2SLFArchive *JA2SLFOpen(const char *archiveName)
                 character = (char)(character - 'A' + 'a');
             }
             lowerName[index] = character;
+            titleName[index] = character;
+            if (index == 0 && character >= 'a' && character <= 'z') {
+                titleName[index] = (char)(character - 'a' + 'A');
+            }
             if (character >= 'a' && character <= 'z') {
                 upperName[index] = (char)(character - 'a' + 'A');
             } else {
@@ -71,6 +76,7 @@ JA2SLFArchive *JA2SLFOpen(const char *archiveName)
         }
         lowerName[index] = 0;
         upperName[index] = 0;
+        titleName[index] = 0;
 
         sprintf(path, ":Data:%s", archiveName);
         archive->file = fopen(path, "rb");
@@ -83,6 +89,10 @@ JA2SLFArchive *JA2SLFOpen(const char *archiveName)
             archive->file = fopen(path, "rb");
         }
         if (archive->file == NULL) {
+            sprintf(path, ":Data:%s", titleName);
+            archive->file = fopen(path, "rb");
+        }
+        if (archive->file == NULL) {
             sprintf(path, "Data/%s", archiveName);
             archive->file = fopen(path, "rb");
         }
@@ -92,6 +102,10 @@ JA2SLFArchive *JA2SLFOpen(const char *archiveName)
         }
         if (archive->file == NULL) {
             sprintf(path, "Data/%s", upperName);
+            archive->file = fopen(path, "rb");
+        }
+        if (archive->file == NULL) {
+            sprintf(path, "Data/%s", titleName);
             archive->file = fopen(path, "rb");
         }
     }
