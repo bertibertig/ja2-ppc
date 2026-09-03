@@ -290,7 +290,9 @@ static Boolean RenderMainMenuBackground(void)
     unsigned char control;
     unsigned char *source;
     RGBColor color;
-    QDErr worldError;
+    PixMapHandle destinationPixMap;
+    unsigned short *destination;
+    long destinationRowBytes;
 
     DebugLog("Menu loader: opening LoadScreens.slf");
     archive = JA2SLFOpen("LoadScreens.slf");
@@ -356,20 +358,24 @@ static Boolean RenderMainMenuBackground(void)
     free(fileData);
 
     source = pixels + dataOffset;
-    if (gMenuWorld == NULL) {
-        Rect worldBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
-        DebugLog("Menu loader: creating 16-bit offscreen world");
-        worldError = NewGWorld(&gMenuWorld, 16, &worldBounds, NULL, NULL, 0);
-        if (worldError != noErr || gMenuWorld == NULL) {
-            DebugLog("Menu loader: 16-bit NewGWorld failed error=%d", worldError);
-            free(pixels);
-            return 0;
-        }
+    SetPort(gWindow);
+    destinationPixMap = ((CWindowPtr)gWindow)->portPixMap;
+    if (destinationPixMap == NULL || !LockPixels(destinationPixMap)) {
+        DebugLog("Menu loader: unable to lock destination PixMap");
+        free(pixels);
+        return 0;
     }
-
-    SetGWorld(gMenuWorld, NULL);
-    DebugLog("Rendering menu image offscreen %ux%u, ETRLE bytes=%lu",
-             width, height, dataLength);
+    destination = (unsigned short *)GetPixBaseAddr(destinationPixMap);
+    destinationRowBytes = (**destinationPixMap).rowBytes & 0x3fff;
+    DebugLog("Rendering menu directly: pixelSize=%d rowBytes=%ld",
+             (**destinationPixMap).pixelSize, destinationRowBytes);
+    if (destination == NULL || (**destinationPixMap).pixelSize != 16 ||
+        destinationRowBytes < (long)width * 2) {
+        DebugLog("Menu loader: unsupported destination PixMap");
+        UnlockPixels(destinationPixMap);
+        free(pixels);
+        return 0;
+    }
     for (y = 0; y < height; ++y) {
         x = 0;
         while (x < width && (unsigned long)(source - (pixels + dataOffset)) < dataLength) {
@@ -380,6 +386,7 @@ static Boolean RenderMainMenuBackground(void)
             run = (unsigned short)(control & 0x7f);
             if (run == 0 || x + run > width) {
                 DebugLog("Bad ETRLE run row=%u x=%u run=%u", y, x, run);
+                UnlockPixels(destinationPixMap);
                 free(pixels);
                 return 0;
             }
@@ -388,16 +395,18 @@ static Boolean RenderMainMenuBackground(void)
             } else {
                 while (run-- != 0) {
                     unsigned short paletteIndex = *source++;
-                    color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
-                    color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
-                    color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
-                    SetCPixel((short)x, (short)y, &color);
+                    color.red = (unsigned short)(palette[paletteIndex * 3] >> 3);
+                    color.green = (unsigned short)(palette[paletteIndex * 3 + 1] >> 3);
+                    color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] >> 3);
+                    destination[(long)y * (destinationRowBytes / 2) + x] =
+                        (unsigned short)((color.red << 10) |
+                                         (color.green << 5) | color.blue);
                     ++x;
                 }
             }
         }
     }
-    BlitMenuBackground();
+    UnlockPixels(destinationPixMap);
     free(pixels);
     return 1;
 }
