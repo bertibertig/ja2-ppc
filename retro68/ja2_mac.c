@@ -283,6 +283,7 @@ static Boolean RenderMainMenuBackground(void)
     unsigned char control;
     unsigned char *source;
     RGBColor color;
+    QDErr worldError;
 
     DebugLog("Menu loader: opening LoadScreens.slf");
     archive = JA2SLFOpen("LoadScreens.slf");
@@ -347,8 +348,10 @@ static Boolean RenderMainMenuBackground(void)
     source = pixels + dataOffset;
     if (gMenuWorld == NULL) {
         Rect worldBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
-        if (NewGWorld(&gMenuWorld, 32, &worldBounds, NULL, NULL, 0) != noErr ||
-            gMenuWorld == NULL) {
+        DebugLog("Menu loader: creating 32-bit offscreen world");
+        worldError = NewGWorld(&gMenuWorld, 32, &worldBounds, NULL, NULL, 0);
+        if (worldError != noErr || gMenuWorld == NULL) {
+            DebugLog("Menu loader: NewGWorld failed error=%d", worldError);
             free(pixels);
             return 0;
         }
