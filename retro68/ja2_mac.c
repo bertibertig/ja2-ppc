@@ -49,6 +49,7 @@ static GWorldPtr gMenuWorld;
 static short gMenuButton = -1;
 static char gDiagnosticsText[4096];
 static unsigned short gDiagnosticsLength;
+static Boolean gDrawingDiagnostics;
 
 static void DebugLog(const char *format, ...)
 {
@@ -81,7 +82,7 @@ static void DebugLog(const char *format, ...)
 #else
     file = NULL;
 #endif
-    if (gDiagnosticsWindow != NULL) {
+    if (gDiagnosticsWindow != NULL && !gDrawingDiagnostics) {
         InvalRect(&gDiagnosticsWindow->portRect);
     }
 }
@@ -115,7 +116,6 @@ static short CountDataLibraries(void)
             fclose(file);
         }
     }
-    DebugLog("Data libraries present: %d/22", present);
     return present;
 }
 
@@ -284,6 +284,7 @@ static Boolean RenderMainMenuBackground(void)
     unsigned char *source;
     RGBColor color;
 
+    DebugLog("Menu loader: opening LoadScreens.slf");
     archive = JA2SLFOpen("LoadScreens.slf");
     if (archive == NULL || !JA2SLFFind(archive, "MAINMENUBACKGROUND.STI",
                                        &fileOffset, &fileLength)) {
@@ -300,6 +301,7 @@ static Boolean RenderMainMenuBackground(void)
         return 0;
     }
     JA2SLFClose(archive);
+    DebugLog("Menu loader: read %lu byte STI", fileLength);
     memcpy(header, fileData, sizeof(header));
     if (memcmp(header, "STCI", 4) != 0 || !(ReadLittleEndian32(&header[16]) & 0x0008) ||
         !(ReadLittleEndian32(&header[16]) & 0x0020)) {
@@ -321,6 +323,7 @@ static Boolean RenderMainMenuBackground(void)
     }
     memcpy(palette, fileData + 64, sizeof(palette));
     memcpy(object, fileData + 64 + 768, sizeof(object));
+    DebugLog("Menu loader: header %ux%u stored=%lu", width, height, storedSize);
 
     dataOffset = ReadLittleEndian32(&object[0]);
     dataLength = ReadLittleEndian32(&object[4]);
@@ -413,6 +416,7 @@ static void DrawDiagnostics(void)
     char *next;
     short y = 16;
 
+    gDrawingDiagnostics = 1;
     SetPort(gDiagnosticsWindow);
     bounds = gDiagnosticsWindow->portRect;
     EraseRect(&bounds);
@@ -432,6 +436,7 @@ static void DrawDiagnostics(void)
         line = next + 1;
         y += 12;
     }
+    gDrawingDiagnostics = 0;
 }
 
 static void DrawMainMenu(void)
