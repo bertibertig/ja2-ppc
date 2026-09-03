@@ -270,7 +270,10 @@ static void BlitMenuBackground(void)
         return;
     }
     SetPort(gWindow);
+    /* The window's portRect excludes the frame; (0,0) local is the
+       top-left of the client area, not the window frame origin. */
     LocalToGlobal(&clientOrigin);
+    DebugLog("Blit origin: global=(%d,%d)", clientOrigin.h, clientOrigin.v);
     destinationPixMap = ((CWindowPtr)gWindow)->portPixMap;
     if (destinationPixMap == NULL || !LockPixels(destinationPixMap)) {
         return;
@@ -284,6 +287,8 @@ static void BlitMenuBackground(void)
         destinationX >= 0 && destinationY >= 0 &&
         destinationX + JA2_SCREEN_WIDTH <= destinationBounds.right - destinationBounds.left &&
         destinationY + JA2_SCREEN_HEIGHT <= destinationBounds.bottom - destinationBounds.top) {
+        DebugLog("Blit: depth=16 rowBytes=%ld destXY=%ld,%ld",
+                 destinationRowBytes, destinationX, destinationY);
         for (y = 0; y < JA2_SCREEN_HEIGHT; ++y) {
             memcpy(&destination[(destinationY + y) * (destinationRowBytes / 2) + destinationX],
                    &gMenuPixels[(long)y * JA2_SCREEN_WIDTH], JA2_SCREEN_WIDTH * 2);
@@ -408,8 +413,13 @@ static Boolean RenderMainMenuBackground(void)
                     unsigned short red = (unsigned short)(palette[paletteIndex * 3] >> 3);
                     unsigned short green = (unsigned short)(palette[paletteIndex * 3 + 1] >> 3);
                     unsigned short blue = (unsigned short)(palette[paletteIndex * 3 + 2] >> 3);
-                    gMenuPixels[(long)y * JA2_SCREEN_WIDTH + x] =
-                        (unsigned short)((red << 10) | (green << 5) | blue);
+                    {
+                        unsigned short pixel = (unsigned short)((red << 10) |
+                                               (green << 5) | blue);
+                        /* PPC is big-endian; the x86 RGB555 word must be byte-swapped. */
+                        gMenuPixels[(long)y * JA2_SCREEN_WIDTH + x] =
+                            (unsigned short)((pixel >> 8) | ((pixel & 0xff) << 8));
+                    }
                     ++x;
                 }
             }
