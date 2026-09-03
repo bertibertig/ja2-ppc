@@ -297,6 +297,7 @@ static Boolean RenderMainMenuBackground(void)
     unsigned char control;
     unsigned char *source;
     RGBColor color;
+    QDErr worldError;
 
     DebugLog("Menu loader: opening LoadScreens.slf");
     archive = JA2SLFOpen("LoadScreens.slf");
@@ -359,8 +360,19 @@ static Boolean RenderMainMenuBackground(void)
     free(fileData);
 
     source = pixels + dataOffset;
-    SetPort(gWindow);
-    DebugLog("Rendering menu image directly through QuickDraw %ux%u, ETRLE bytes=%lu",
+    if (gMenuWorld == NULL) {
+        Rect worldBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
+        DebugLog("Menu loader: creating 16-bit offscreen world");
+        worldError = NewGWorld(&gMenuWorld, 16, &worldBounds, NULL, NULL, 0);
+        if (worldError != noErr || gMenuWorld == NULL) {
+            DebugLog("Menu loader: 16-bit NewGWorld failed error=%d", worldError);
+            free(pixels);
+            return 0;
+        }
+    }
+
+    SetGWorld(gMenuWorld, NULL);
+    DebugLog("Rendering menu image offscreen %ux%u, ETRLE bytes=%lu",
              width, height, dataLength);
     for (y = 0; y < height; ++y) {
         x = 0;
@@ -389,7 +401,7 @@ static Boolean RenderMainMenuBackground(void)
             }
         }
     }
-    SetPort(gWindow);
+    BlitMenuBackground();
     free(pixels);
     return 1;
 }
