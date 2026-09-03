@@ -16,6 +16,7 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include "ja2_music.h"
 #include "ja2_slf.h"
 
 #define JA2_SCREEN_WIDTH 640
@@ -839,7 +840,6 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
     UnlockPixels(menuPixMap);
     SetPort(gWindow);
     free(fileData);
-    DebugLog("Menu loader: rendered original TITLETEXT button graphics");
     return 1;
 }
 
@@ -870,20 +870,14 @@ static void BlitMenuBackground(void)
         DebugLog("Menu blit: missing source or destination PixMap");
         return;
     }
-    DebugLog("Menu blit: screen=%d source=%d,%d,%d,%d destination=%d,%d,%d,%d",
-             gMenuScreen, sourceBounds.left, sourceBounds.top,
-             sourceBounds.right, sourceBounds.bottom,
-             destinationBounds.left, destinationBounds.top,
-             destinationBounds.right, destinationBounds.bottom);
-    LogPixMap("menu source", sourcePixMap);
-    LogPixMap("window destination", destinationPixMap);
     CopyBits((BitMap *)&((CGrafPtr)gMenuWorld)->portPixMap,
              (BitMap *)&((CWindowPtr)gWindow)->portPixMap,
              &sourceBounds, &destinationBounds, srcCopy, NULL);
-    DebugLog("Menu blit: CopyBits completed");
     if (!gMenuBlitLogged) {
         gMenuBlitLogged = 1;
-        DebugLog("Menu blit: CopyBits 32-bit GWorld to color window");
+        DebugLog("Menu blit: copied 640x480 32-bit GWorld to color window");
+        LogPixMap("menu source", sourcePixMap);
+        LogPixMap("window destination", destinationPixMap);
     }
 }
 
@@ -1180,6 +1174,7 @@ static void EnterMainMenu(void)
        background before restoring the menu logo and title graphics. */
     RenderMainMenuDirectly();
     gMainMenuNeedsRender = 0;
+    JA2MenuMusicStart();
     DebugLog("Startup: entered main menu");
 }
 
@@ -1378,9 +1373,6 @@ static void HandleJA2Event(const EventRecord *event)
     } else if (event->what == updateEvt) {
         WindowPtr updatedWindow = (WindowPtr)event->message;
         redrawMenuAfterUpdate = 0;
-        DebugLog("Window update: main=%d diagnostics=%d screen=%d startup=%d menu=%d",
-                 updatedWindow == gWindow, updatedWindow == gDiagnosticsWindow,
-                 gMenuScreen, gStartupActive, gMenuBackgroundLoaded);
         BeginUpdate(updatedWindow);
         if (updatedWindow == gDiagnosticsWindow) {
             DrawDiagnostics();
@@ -1446,6 +1438,7 @@ int main(void)
                                     documentProc, (WindowPtr)-1, 1, 0);
 #endif
     DebugLog("JA2 PPC startup");
+    JA2MenuMusicSetLogger(DebugLog);
     DebugLog("Diagnostics build: %s",
 #if defined(JA2_DEBUG_BUILD)
              "enabled"
@@ -1480,6 +1473,7 @@ int main(void)
 
     while (gRunning) {
         PollStartup();
+        JA2MenuMusicPoll();
         UpdateMainMenuHover();
         if (WaitNextEvent(everyEvent, &event, 10, NULL)) {
             HandleJA2Event(&event);
@@ -1493,6 +1487,7 @@ int main(void)
     if (gDiagnosticsWindow != NULL) {
         DisposeWindow(gDiagnosticsWindow);
     }
+    JA2MenuMusicShutdown();
     DisposeWindow(window);
     return 0;
 }
