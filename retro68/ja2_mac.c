@@ -262,6 +262,20 @@ static unsigned short ReadLittleEndian16(const unsigned char *bytes)
     return (unsigned short)(bytes[0] | ((unsigned short)bytes[1] << 8));
 }
 
+static void BlitMenuBackground(void)
+{
+    Rect sourceBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
+    Rect destinationBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
+
+    if (gMenuWorld == NULL) {
+        return;
+    }
+    SetPort(gWindow);
+    CopyBits((BitMap *)&(**GetGWorldPixMap(gMenuWorld)),
+             &((GrafPtr)gWindow)->portBits,
+             &sourceBounds, &destinationBounds, srcCopy, NULL);
+}
+
 static Boolean RenderMainMenuBackground(void)
 {
     JA2SLFArchive *archive;
@@ -386,14 +400,7 @@ static Boolean RenderMainMenuBackground(void)
             }
         }
     }
-    SetPort(gWindow);
-    {
-        Rect sourceBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
-        Rect destinationBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
-        CopyBits((BitMap *)&(**GetGWorldPixMap(gMenuWorld)),
-                 &((GrafPtr)gWindow)->portBits,
-                 &sourceBounds, &destinationBounds, srcCopy, NULL);
-    }
+    BlitMenuBackground();
     free(pixels);
     return 1;
 }
@@ -577,12 +584,8 @@ static void HandleJA2Event(const EventRecord *event)
             return;
         }
         if (gMenuBackgroundLoaded) {
-            if (!RenderMainMenuBackground()) {
-                gMenuBackgroundLoaded = 0;
-                DrawJA2Shell();
-            } else {
-                DrawMainMenu();
-            }
+            BlitMenuBackground();
+            DrawMainMenu();
         } else {
             DrawJA2Shell();
         }
