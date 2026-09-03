@@ -98,22 +98,15 @@ static const char *gRequiredLibraries[] = {
 
 static short CountDataLibraries(void)
 {
-    FILE *file;
+    JA2SLFArchive *archive;
     short index;
     short present = 0;
-    char path[64];
 
     for (index = 0; index < 22; ++index) {
-        /* A leading colon makes Data relative to the application volume. */
-        sprintf(path, ":Data:%s", gRequiredLibraries[index]);
-        file = fopen(path, "rb");
-        if (file == NULL) {
-            sprintf(path, "Data/%s", gRequiredLibraries[index]);
-            file = fopen(path, "rb");
-        }
-        if (file != NULL) {
+        archive = JA2SLFOpen(gRequiredLibraries[index]);
+        if (archive != NULL) {
             ++present;
-            fclose(file);
+            JA2SLFClose(archive);
         }
     }
     return present;
@@ -301,9 +294,12 @@ static Boolean RenderMainMenuBackground(void)
 
     DebugLog("Menu loader: opening LoadScreens.slf");
     archive = JA2SLFOpen("LoadScreens.slf");
-    if (archive == NULL || !JA2SLFFind(archive, "MAINMENUBACKGROUND.STI",
-                                       &fileOffset, &fileLength)) {
-        DebugLog("Main menu entry not found");
+    if (archive == NULL) {
+        DebugLog("Menu loader: cannot open LoadScreens.slf");
+        return 0;
+    }
+    if (!JA2SLFFind(archive, "MAINMENUBACKGROUND.STI", &fileOffset, &fileLength)) {
+        DebugLog("Menu loader: MAINMENUBACKGROUND.STI not found in LoadScreens.slf");
         JA2SLFClose(archive);
         return 0;
     }

@@ -53,10 +53,45 @@ JA2SLFArchive *JA2SLFOpen(const char *archiveName)
 
     {
         char path[256];
+        char lowerName[256];
+        char upperName[256];
+        unsigned short index;
+
+        for (index = 0; archiveName[index] != 0 && index < sizeof(lowerName) - 1; ++index) {
+            char character = archiveName[index];
+            if (character >= 'A' && character <= 'Z') {
+                character = (char)(character - 'A' + 'a');
+            }
+            lowerName[index] = character;
+            if (character >= 'a' && character <= 'z') {
+                upperName[index] = (char)(character - 'a' + 'A');
+            } else {
+                upperName[index] = character;
+            }
+        }
+        lowerName[index] = 0;
+        upperName[index] = 0;
+
         sprintf(path, ":Data:%s", archiveName);
         archive->file = fopen(path, "rb");
         if (archive->file == NULL) {
+            sprintf(path, ":Data:%s", lowerName);
+            archive->file = fopen(path, "rb");
+        }
+        if (archive->file == NULL) {
+            sprintf(path, ":Data:%s", upperName);
+            archive->file = fopen(path, "rb");
+        }
+        if (archive->file == NULL) {
             sprintf(path, "Data/%s", archiveName);
+            archive->file = fopen(path, "rb");
+        }
+        if (archive->file == NULL) {
+            sprintf(path, "Data/%s", lowerName);
+            archive->file = fopen(path, "rb");
+        }
+        if (archive->file == NULL) {
+            sprintf(path, "Data/%s", upperName);
             archive->file = fopen(path, "rb");
         }
     }
