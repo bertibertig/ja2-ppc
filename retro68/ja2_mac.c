@@ -48,12 +48,50 @@ static Boolean gMenuBackgroundLoaded = 0;
 static Boolean gMenuButtonsLoaded = 0;
 static GWorldPtr gMenuWorld;
 static Boolean gMenuBlitLogged = 0;
+static Boolean gMenuRenderDirectToWindow = 0;
+static Boolean gMainMenuNeedsRender = 0;
+static Boolean gActionScreenNeedsRender = 0;
 static short gMenuButton = -1;
+static short gMenuHoverButton = -1;
 static Boolean gStartupActive = 0;
 static unsigned long gStartupStartTicks;
 static char gDiagnosticsText[4096];
 static unsigned short gDiagnosticsLength;
 static Boolean gDrawingDiagnostics;
+
+enum {
+    MENU_SCREEN_MAIN,
+    MENU_SCREEN_NEW_GAME,
+    MENU_SCREEN_LOAD_GAME,
+    MENU_SCREEN_OPTIONS,
+    MENU_SCREEN_CREDITS
+};
+
+static short gMenuScreen = MENU_SCREEN_MAIN;
+
+static void DebugLog(const char *format, ...);
+
+static PixMapHandle GetMenuRenderPixMap(void)
+{
+    if (gMenuRenderDirectToWindow) {
+        SetPort(gWindow);
+        return ((CWindowPtr)gWindow)->portPixMap;
+    }
+    SetGWorld(gMenuWorld, NULL);
+    return GetGWorldPixMap(gMenuWorld);
+}
+
+static void LogPixMap(const char *name, PixMapHandle pixMap)
+{
+    if (pixMap == NULL) {
+        DebugLog("Renderer: %s PixMap is null", name);
+        return;
+    }
+    DebugLog("Renderer: %s PixMap bounds=%d,%d,%d,%d rowBytes=%ld depth=%d",
+             name, (**pixMap).bounds.left, (**pixMap).bounds.top,
+             (**pixMap).bounds.right, (**pixMap).bounds.bottom,
+             (long)((**pixMap).rowBytes & 0x3fff), (**pixMap).pixelSize);
+}
 
 static void DebugLog(const char *format, ...)
 {
@@ -376,8 +414,7 @@ static Boolean RenderMenuLogo(void)
     memcpy(pixels, fileData + 64 + 768 + 16, storedSize);
     free(fileData);
     source = pixels + dataOffset;
-    SetGWorld(gMenuWorld, NULL);
-    menuPixMap = GetGWorldPixMap(gMenuWorld);
+    menuPixMap = GetMenuRenderPixMap();
     if (menuPixMap == NULL || !LockPixels(menuPixMap)) {
         free(pixels);
         return 0;
@@ -662,10 +699,15 @@ static Boolean RenderStartupSplash(void)
     return 1;
 }
 
-static Boolean RenderMenuButtons(void)
+static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
+                                      short highlightedButton)
 {
-    static const unsigned short objectIndex[] = { 0, 3, 7, 10, 15 };
+    static const unsigned short objectIndex[][2] = {
+        { 0, 1 }, { 3, 4 }, { 7, 8 }, { 10, 11 }, { 14, 15 }
+    };
     JA2SLFArchive *archive;
+    const char *archiveName;
+    const char *buttonFileName;
     unsigned char *fileData;
     unsigned char header[64];
     unsigned char palette[768];
@@ -691,11 +733,18 @@ static Boolean RenderMenuButtons(void)
     PixMapHandle menuPixMap;
     unsigned char *source;
 
-    archive = JA2SLFOpen("LoadScreens.slf");
-    if (archive == NULL || !JA2SLFFind(archive, "TITLETEXT.STI", &fileOffset,
+#if defined(JA2_LANGUAGE_GERMAN)
+    archiveName = "German.slf";
+    buttonFileName = "TITLETEXT_GERMAN.STI";
+#else
+    archiveName = "LoadScreens.slf";
+    buttonFileName = "TITLETEXT.STI";
+#endif
+    archive = JA2SLFOpen(archiveName);
+    if (archive == NULL || !JA2SLFFind(archive, buttonFileName, &fileOffset,
                                        &fileLength)) {
         if (archive != NULL) JA2SLFClose(archive);
-        DebugLog("Menu loader: TITLETEXT.STI not found");
+        DebugLog("Menu loader: %s not found in %s", buttonFileName, archiveName);
         return 0;
     }
     fileData = (unsigned char *)malloc(fileLength);
@@ -717,7 +766,7 @@ static Boolean RenderMenuButtons(void)
     imageHeight = ReadLittleEndian16(&header[20]);
     imageWidth = ReadLittleEndian16(&header[22]);
     objectCount = ReadLittleEndian16(&header[28]);
-    if (objectCount == 0 || objectCount <= objectIndex[4] ||
+    if (objectCount == 0 || objectCount <= objectIndex[4][1] ||
         ReadLittleEndian32(&header[24]) != 256 ||
         fileLength < 64 + 768 + (unsigned long)objectCount * 16 + storedSize) {
         free(fileData);
@@ -725,15 +774,14 @@ static Boolean RenderMenuButtons(void)
     }
     memcpy(palette, fileData + 64, sizeof(palette));
     pixels = fileData + 64 + 768 + (unsigned long)objectCount * 16;
-    SetGWorld(gMenuWorld, NULL);
-    menuPixMap = GetGWorldPixMap(gMenuWorld);
+    menuPixMap = GetMenuRenderPixMap();
     if (menuPixMap == NULL || !LockPixels(menuPixMap)) {
         free(fileData);
         return 0;
     }
-    for (item = 0; item < 5; ++item) {
+    for (item = (unsigned short)firstButton; item <= (unsigned short)lastButton; ++item) {
         const unsigned char *object = fileData + 64 + 768 +
-                                      (unsigned long)objectIndex[item] * 16;
+                                       (unsigned long)objectIndex[item][highlightedButton == item] * 16;
         dataOffset = ReadLittleEndian32(&object[0]);
         dataLength = ReadLittleEndian32(&object[4]);
         offsetX = (short)ReadLittleEndian16(&object[8]);
@@ -795,6 +843,11 @@ static Boolean RenderMenuButtons(void)
     return 1;
 }
 
+static Boolean RenderMenuButtons(void)
+{
+    return RenderMenuButtonFrames(0, 4, gMenuHoverButton);
+}
+
 static void BlitMenuBackground(void)
 {
     Rect sourceBounds;
@@ -814,11 +867,20 @@ static void BlitMenuBackground(void)
     sourcePixMap = GetGWorldPixMap(gMenuWorld);
     destinationPixMap = ((CWindowPtr)gWindow)->portPixMap;
     if (sourcePixMap == NULL || destinationPixMap == NULL) {
+        DebugLog("Menu blit: missing source or destination PixMap");
         return;
     }
+    DebugLog("Menu blit: screen=%d source=%d,%d,%d,%d destination=%d,%d,%d,%d",
+             gMenuScreen, sourceBounds.left, sourceBounds.top,
+             sourceBounds.right, sourceBounds.bottom,
+             destinationBounds.left, destinationBounds.top,
+             destinationBounds.right, destinationBounds.bottom);
+    LogPixMap("menu source", sourcePixMap);
+    LogPixMap("window destination", destinationPixMap);
     CopyBits((BitMap *)&((CGrafPtr)gMenuWorld)->portPixMap,
              (BitMap *)&((CWindowPtr)gWindow)->portPixMap,
              &sourceBounds, &destinationBounds, srcCopy, NULL);
+    DebugLog("Menu blit: CopyBits completed");
     if (!gMenuBlitLogged) {
         gMenuBlitLogged = 1;
         DebugLog("Menu blit: CopyBits 32-bit GWorld to color window");
@@ -912,12 +974,11 @@ static Boolean RenderMainMenuBackground(void)
     free(fileData);
 
     source = pixels + dataOffset;
-    if (!EnsureMenuWorld()) {
+    if (!gMenuRenderDirectToWindow && !EnsureMenuWorld()) {
         free(pixels);
         return 0;
     }
-    SetGWorld(gMenuWorld, NULL);
-    menuPixMap = GetGWorldPixMap(gMenuWorld);
+    menuPixMap = GetMenuRenderPixMap();
     if (menuPixMap == NULL || !LockPixels(menuPixMap)) {
         DebugLog("Menu loader: unable to lock offscreen PixMap");
         free(pixels);
@@ -930,7 +991,11 @@ static Boolean RenderMainMenuBackground(void)
         free(pixels);
         return 0;
     }
-    EraseRect(&((GrafPtr)gMenuWorld)->portRect);
+    if (gMenuRenderDirectToWindow) {
+        EraseRect(&gWindow->portRect);
+    } else {
+        EraseRect(&((GrafPtr)gMenuWorld)->portRect);
+    }
     DebugLog("Rendering menu image offscreen %ux%u, ETRLE bytes=%lu",
              width, height, dataLength);
     for (y = 0; y < height; ++y) {
@@ -973,7 +1038,6 @@ static Boolean RenderMainMenuBackground(void)
     }
     UnlockPixels(menuPixMap);
     SetPort(gWindow);
-    BlitMenuBackground();
     free(pixels);
     return 1;
 }
@@ -1051,26 +1115,84 @@ static void DrawMainMenu(void)
     }
 }
 
+static void DrawMenuActionScreen(void)
+{
+    static const char *titles[] = {
+        "Spielstartoptionen", "Spiel laden", "Einstellungen", "Credits"
+    };
+    static const char *details[] = {
+        "Die Spielstartoptionen werden hier angezeigt.",
+        "Die gespeicherten Spiele werden hier angezeigt.",
+        "Die Spieleinstellungen werden hier angezeigt.",
+        "Die Credits werden hier angezeigt."
+    };
+    Rect bounds;
+    RGBColor background = { 0x1200, 0x1600, 0x2200 };
+    RGBColor accent = { 0xd900, 0x9b00, 0x4500 };
+    RGBColor white = { 0xffff, 0xffff, 0xffff };
+    short action = (short)(gMenuScreen - MENU_SCREEN_NEW_GAME);
+
+    HideCursor();
+    SetPort(gWindow);
+    bounds = gWindow->portRect;
+    RGBForeColor(&background);
+    PaintRect(&bounds);
+    TextFont(systemFont);
+    TextSize(24);
+    RGBForeColor(&accent);
+    MoveTo(60, 110);
+    DrawCString(60, 110, titles[action]);
+    TextSize(13);
+    RGBForeColor(&white);
+    DrawCString(60, 160, details[action]);
+    DrawCString(60, 210, "ESC: Zurueck zum Hauptmenue");
+    ShowCursor();
+}
+
 static void DrawJA2Shell(void);
+static void EnterMainMenu(void);
+
+static void RenderMainMenuDirectly(void)
+{
+    HideCursor();
+    gMenuRenderDirectToWindow = 1;
+    gMenuBackgroundLoaded = RenderMainMenuBackground();
+    if (gMenuBackgroundLoaded) {
+        RenderMenuLogo();
+        gMenuButtonsLoaded = RenderMenuButtons();
+        if (!gMenuButtonsLoaded) {
+            DrawMainMenu();
+        }
+    } else {
+        gMenuButtonsLoaded = 0;
+        DrawJA2Shell();
+    }
+    gMenuRenderDirectToWindow = 0;
+    ShowCursor();
+}
 
 static void EnterMainMenu(void)
 {
     gStartupActive = 0;
     gMenuBlitLogged = 0;
+    DebugLog("Main menu: rebuilding archive-backed composition");
     /* The splash was drawn over the cached world; reload the original
        background before restoring the menu logo and title graphics. */
-    gMenuBackgroundLoaded = RenderMainMenuBackground();
-    if (gMenuBackgroundLoaded) {
-        RenderMenuLogo();
-        gMenuButtonsLoaded = RenderMenuButtons();
-        BlitMenuBackground();
-        if (!gMenuButtonsLoaded) {
-            DrawMainMenu();
-        }
-    } else {
-        DrawJA2Shell();
-    }
+    RenderMainMenuDirectly();
+    gMainMenuNeedsRender = 0;
     DebugLog("Startup: entered main menu");
+}
+
+static void RestoreMainMenu(void)
+{
+    DebugLog("Main menu: restoring from screen %d", gMenuScreen);
+    gMenuScreen = MENU_SCREEN_MAIN;
+    gActionScreenNeedsRender = 0;
+    gMenuButton = -1;
+    gMenuHoverButton = -1;
+    gMainMenuNeedsRender = 1;
+    SetPort(gWindow);
+    InvalRect(&gWindow->portRect);
 }
 
 static void PollStartup(void)
@@ -1080,22 +1202,89 @@ static void PollStartup(void)
     }
 }
 
-static void HandleMainMenuClick(Point point)
+static short GetMainMenuButtonAt(Point point)
 {
     short index;
 
     for (index = 0; index < 5; ++index) {
         if (point.h >= 180 && point.h < 460 &&
             point.v >= 277 + index * 37 && point.v < 305 + index * 37) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+static void UpdateMainMenuHover(void)
+{
+    Point point;
+    Boolean rendered;
+    short previousButton;
+    short hoverButton;
+
+    if (gStartupActive || gMenuScreen != MENU_SCREEN_MAIN || !gMenuBackgroundLoaded) {
+        return;
+    }
+    SetPort(gWindow);
+    GetMouse(&point);
+    hoverButton = GetMainMenuButtonAt(point);
+    if (hoverButton != gMenuHoverButton) {
+        previousButton = gMenuHoverButton;
+        gMenuHoverButton = hoverButton;
+        HideCursor();
+        gMenuRenderDirectToWindow = 1;
+        if (previousButton < 0) {
+            rendered = RenderMenuButtonFrames(hoverButton, hoverButton, hoverButton);
+        } else if (hoverButton < 0) {
+            rendered = RenderMenuButtonFrames(previousButton, previousButton, -1);
+        } else {
+            rendered = RenderMenuButtonFrames(previousButton < hoverButton ? previousButton : hoverButton,
+                                               previousButton > hoverButton ? previousButton : hoverButton,
+                                               hoverButton);
+        }
+        if (!rendered) {
+            RenderMainMenuDirectly();
+        }
+        gMenuRenderDirectToWindow = 0;
+        ShowCursor();
+    }
+}
+
+static void HandleMainMenuClick(Point point)
+{
+    short index = GetMainMenuButtonAt(point);
+
+    if (index >= 0) {
             gMenuButton = index;
-            if (index == 4) {
-                DebugLog("German main menu: quit selected");
-                gRunning = 0;
-            } else {
-                DebugLog("German main menu: button %d selected", index);
+            DebugLog("German main menu: click at %d,%d selected button %d",
+                     point.h, point.v, index);
+            switch (index) {
+                case 0:
+                    gMenuScreen = MENU_SCREEN_NEW_GAME;
+                    DebugLog("German main menu: new game selected");
+                    break;
+                case 1:
+                    gMenuScreen = MENU_SCREEN_LOAD_GAME;
+                    DebugLog("German main menu: load game selected");
+                    break;
+                case 2:
+                    gMenuScreen = MENU_SCREEN_OPTIONS;
+                    DebugLog("German main menu: preferences selected");
+                    break;
+                case 3:
+                    gMenuScreen = MENU_SCREEN_CREDITS;
+                    DebugLog("German main menu: credits selected");
+                    break;
+                case 4:
+                    DebugLog("German main menu: quit selected");
+                    gRunning = 0;
+                    break;
+            }
+            if (gMenuScreen != MENU_SCREEN_MAIN) {
+                gActionScreenNeedsRender = 1;
+                DrawMenuActionScreen();
             }
             return;
-        }
     }
 }
 
@@ -1158,10 +1347,14 @@ static void HandleJA2Event(const EventRecord *event)
     char key;
     WindowPtr clicked;
     short part;
+    Boolean redrawMenuAfterUpdate;
 
     if (event->what == keyDown || event->what == autoKey) {
         key = (char)(event->message & charCodeMask);
-        if (key == 'q' || key == 'Q' || (event->modifiers & cmdKey)) {
+        DebugLog("Input: key=%d screen=%d", (unsigned char)key, gMenuScreen);
+        if (gMenuScreen != MENU_SCREEN_MAIN && (key == 27 || key == 'b' || key == 'B')) {
+            RestoreMainMenu();
+        } else if (key == 'q' || key == 'Q' || (event->modifiers & cmdKey)) {
             gRunning = 0;
         }
     } else if (event->what == mouseDown) {
@@ -1176,25 +1369,45 @@ static void HandleJA2Event(const EventRecord *event)
             }
         } else if (clicked == gWindow && part == inContent) {
             Point point = event->where;
+            SetPort(gWindow);
             GlobalToLocal(&point);
-            if (!gStartupActive) {
+            if (!gStartupActive && gMenuScreen == MENU_SCREEN_MAIN) {
                 HandleMainMenuClick(point);
             }
         }
     } else if (event->what == updateEvt) {
         WindowPtr updatedWindow = (WindowPtr)event->message;
+        redrawMenuAfterUpdate = 0;
+        DebugLog("Window update: main=%d diagnostics=%d screen=%d startup=%d menu=%d",
+                 updatedWindow == gWindow, updatedWindow == gDiagnosticsWindow,
+                 gMenuScreen, gStartupActive, gMenuBackgroundLoaded);
         BeginUpdate(updatedWindow);
         if (updatedWindow == gDiagnosticsWindow) {
             DrawDiagnostics();
             EndUpdate(updatedWindow);
             return;
         }
-        if (gStartupActive || gMenuBackgroundLoaded) {
-            BlitMenuBackground();
+        if (gStartupActive ||
+            (gMenuBackgroundLoaded && gMenuScreen == MENU_SCREEN_MAIN)) {
+            redrawMenuAfterUpdate = gStartupActive;
+        } else if (gMenuScreen != MENU_SCREEN_MAIN) {
+            if (gActionScreenNeedsRender) {
+                gActionScreenNeedsRender = 0;
+                DrawMenuActionScreen();
+            }
         } else {
             DrawJA2Shell();
         }
         EndUpdate(updatedWindow);
+        if (updatedWindow == gWindow && redrawMenuAfterUpdate) {
+            /* Copy after EndUpdate so QuickDraw cannot clear the new frame as
+               part of finalizing the invalidated content region. */
+            BlitMenuBackground();
+        }
+        if (updatedWindow == gWindow && gMainMenuNeedsRender) {
+            gMainMenuNeedsRender = 0;
+            RenderMainMenuDirectly();
+        }
         if (updatedWindow == gWindow && gMenuBackgroundLoaded &&
             !gMenuButtonsLoaded && !gStartupActive) {
             /* The update region clips drawing. Restore controls after the
@@ -1267,6 +1480,7 @@ int main(void)
 
     while (gRunning) {
         PollStartup();
+        UpdateMainMenuHover();
         if (WaitNextEvent(everyEvent, &event, 10, NULL)) {
             HandleJA2Event(&event);
         }
