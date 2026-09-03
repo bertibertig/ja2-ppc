@@ -296,8 +296,11 @@ static Boolean RenderMainMenuBackground(void)
     unsigned short run;
     unsigned char control;
     unsigned char *source;
-    RGBColor color;
     QDErr worldError;
+    CTabHandle colorTable;
+    PixMapHandle menuPixMap;
+    unsigned char *destination;
+    long destinationRowBytes;
 
     DebugLog("Menu loader: opening LoadScreens.slf");
     archive = JA2SLFOpen("LoadScreens.slf");
@@ -362,8 +365,27 @@ static Boolean RenderMainMenuBackground(void)
     source = pixels + dataOffset;
     if (gMenuWorld == NULL) {
         Rect worldBounds = { 0, 0, JA2_SCREEN_HEIGHT, JA2_SCREEN_WIDTH };
-        DebugLog("Menu loader: creating 32-bit offscreen world");
-        worldError = NewGWorld(&gMenuWorld, 32, &worldBounds, NULL, NULL, 0);
+        unsigned short paletteIndex;
+        DebugLog("Menu loader: creating 8-bit palette world");
+        colorTable = (CTabHandle)NewHandleClear(sizeof(ColorTable) +
+                                                 255 * sizeof(ColorSpec));
+        if (colorTable == NULL) {
+            DebugLog("Menu loader: palette allocation failed");
+            free(pixels);
+            return 0;
+        }
+        (**colorTable).ctSize = 255;
+        for (paletteIndex = 0; paletteIndex < 256; ++paletteIndex) {
+            (**colorTable).ctTable[paletteIndex].value = paletteIndex;
+            (**colorTable).ctTable[paletteIndex].rgb.red =
+                (unsigned short)(palette[paletteIndex * 3] << 8);
+            (**colorTable).ctTable[paletteIndex].rgb.green =
+                (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
+            (**colorTable).ctTable[paletteIndex].rgb.blue =
+                (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
+        }
+        worldError = NewGWorld(&gMenuWorld, 8, &worldBounds, colorTable, NULL, 0);
+        DisposeHandle((Handle)colorTable);
         if (worldError != noErr || gMenuWorld == NULL) {
             DebugLog("Menu loader: NewGWorld failed error=%d", worldError);
             free(pixels);
@@ -372,6 +394,20 @@ static Boolean RenderMainMenuBackground(void)
     }
 
     SetGWorld(gMenuWorld, NULL);
+    menuPixMap = GetGWorldPixMap(gMenuWorld);
+    if (!LockPixels(menuPixMap)) {
+        DebugLog("Menu loader: unable to lock palette world");
+        free(pixels);
+        return 0;
+    }
+    destination = (unsigned char *)GetPixBaseAddr(menuPixMap);
+    destinationRowBytes = (**menuPixMap).rowBytes & 0x3fff;
+    if (destination == NULL || destinationRowBytes < width) {
+        DebugLog("Menu loader: invalid pixel base or rowBytes=%ld", destinationRowBytes);
+        UnlockPixels(menuPixMap);
+        free(pixels);
+        return 0;
+    }
     DebugLog("Rendering menu image %ux%u, ETRLE bytes=%lu", width, height, dataLength);
     for (y = 0; y < height; ++y) {
         x = 0;
@@ -391,15 +427,14 @@ static Boolean RenderMainMenuBackground(void)
             } else {
                 while (run-- != 0) {
                     unsigned short paletteIndex = *source++;
-                    color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
-                    color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
-                    color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
-                    SetCPixel((short)x, (short)y, &color);
+                    destination[(long)y * destinationRowBytes + x] =
+                        (unsigned char)paletteIndex;
                     ++x;
                 }
             }
         }
     }
+    UnlockPixels(menuPixMap);
     BlitMenuBackground();
     free(pixels);
     return 1;
