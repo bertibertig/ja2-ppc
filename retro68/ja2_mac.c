@@ -49,6 +49,8 @@ static Boolean gMenuButtonsLoaded = 0;
 static GWorldPtr gMenuWorld;
 static Boolean gMenuBlitLogged = 0;
 static short gMenuButton = -1;
+static Boolean gStartupActive = 0;
+static unsigned long gStartupStartTicks;
 static char gDiagnosticsText[4096];
 static unsigned short gDiagnosticsLength;
 static Boolean gDrawingDiagnostics;
@@ -273,6 +275,23 @@ static void WriteMenuPixel(PixMapHandle pixMap, short x, short y,
     pixel[3] = (unsigned char)(color->blue >> 8);
 }
 
+static Boolean EnsureMenuWorld(void)
+{
+    QDErr worldError;
+    Rect worldBounds = { -40, -40, 560, 760 };
+
+    if (gMenuWorld != NULL) {
+        return 1;
+    }
+    DebugLog("Renderer: creating 32-bit 800x600 transfer world");
+    worldError = NewGWorld(&gMenuWorld, 32, &worldBounds, NULL, NULL, 0);
+    if (worldError != noErr || gMenuWorld == NULL) {
+        DebugLog("Renderer: 32-bit NewGWorld failed error=%d", worldError);
+        return 0;
+    }
+    return 1;
+}
+
 static Boolean RenderMenuLogo(void)
 {
     JA2SLFArchive *archive;
@@ -402,6 +421,235 @@ static Boolean RenderMenuLogo(void)
         /* ETRLE stores a zero after every scanline. A literal/transparent run
            can end exactly at width, which otherwise leaves that zero to be
            decoded as a blank row on the next iteration. */
+        if (x == width &&
+            (unsigned long)(source - (pixels + dataOffset)) < dataLength &&
+            *source == 0) {
+            ++source;
+        }
+    }
+    UnlockPixels(menuPixMap);
+    SetPort(gWindow);
+    free(pixels);
+    return 1;
+}
+
+/* Render the language splash used by InitJA2SplashScreen() in the original
+   SGP.  It is kept separate from the menu logo because the splash belongs to
+   the startup state and must disappear before the menu becomes interactive. */
+static Boolean RenderStartupSplash(void)
+{
+    static const char *archiveNames[] = {
+#if defined(JA2_LANGUAGE_GERMAN)
+        "German.slf", "LoadScreens.slf"
+#else
+        "Interface.slf", "LoadScreens.slf"
+#endif
+    };
+    static const char *entryNames[] = {
+#if defined(JA2_LANGUAGE_GERMAN)
+        "SPLASH_GERMAN.STI", "SPLASH.STI"
+#else
+        "SIRTECHSPLASH.STI", "SIRTECHSPLASH.STI"
+#endif
+    };
+    JA2SLFArchive *archive;
+    unsigned char *fileData;
+    unsigned char header[64];
+    unsigned char palette[768];
+    unsigned char object[16];
+    unsigned char *pixels;
+    unsigned char *source;
+    unsigned long fileOffset;
+    unsigned long fileLength;
+    unsigned long storedSize;
+    unsigned long dataOffset;
+    unsigned long dataLength;
+    unsigned long sourceUsed;
+    unsigned short width;
+    unsigned short height;
+    unsigned short x;
+    unsigned short y;
+    unsigned short run;
+    unsigned char control;
+    unsigned short paletteIndex;
+    unsigned short pixel;
+    short offsetX;
+    short offsetY;
+    RGBColor color;
+    PixMapHandle menuPixMap;
+    unsigned short candidate;
+
+    archive = NULL;
+    for (candidate = 0; candidate < sizeof(archiveNames) / sizeof(archiveNames[0]);
+         ++candidate) {
+        archive = JA2SLFOpen(archiveNames[candidate]);
+        if (archive == NULL) {
+            DebugLog("Startup: cannot open %s", archiveNames[candidate]);
+            continue;
+        }
+        DebugLog("Startup: opened %s with %lu entries", archiveNames[candidate],
+                 JA2SLFEntryCount(archive));
+        if (JA2SLFFind(archive, entryNames[candidate], &fileOffset, &fileLength)) {
+            DebugLog("Startup: found %s in %s at %lu length %lu",
+                     entryNames[candidate], archiveNames[candidate], fileOffset,
+                     fileLength);
+            break;
+        }
+        DebugLog("Startup: %s not found in %s", entryNames[candidate],
+                 archiveNames[candidate]);
+        JA2SLFClose(archive);
+        archive = NULL;
+    }
+    if (archive == NULL) {
+        DebugLog("Startup: no usable logo archive/entry found");
+        return 0;
+    }
+    fileData = (unsigned char *)malloc(fileLength);
+    if (fileData == NULL) {
+        DebugLog("Startup: unable to allocate %lu logo bytes", fileLength);
+        JA2SLFClose(archive);
+        return 0;
+    }
+    if (fileLength < 64 + 768 + 16 ||
+        !JA2SLFRead(archive, fileOffset, fileData, fileLength)) {
+        DebugLog("Startup: failed reading logo at %lu length %lu", fileOffset,
+                 fileLength);
+        free(fileData);
+        JA2SLFClose(archive);
+        return 0;
+    }
+    DebugLog("Startup: read logo entry (%lu bytes)", fileLength);
+    JA2SLFClose(archive);
+    if (memcmp(fileData, "STCI", 4) != 0) {
+        DebugLog("Startup: logo entry has no STCI header");
+        free(fileData);
+        return 0;
+    }
+
+    storedSize = ReadLittleEndian32(&fileData[8]);
+    memcpy(header, fileData, sizeof(header));
+    width = ReadLittleEndian16(&header[22]);
+    height = ReadLittleEndian16(&header[20]);
+    if (ReadLittleEndian32(&header[16]) & 0x0004) {
+        if (ReadLittleEndian32(&header[24]) != 0xf800 ||
+            ReadLittleEndian32(&header[28]) != 0x07e0 ||
+            ReadLittleEndian32(&header[32]) != 0x001f || header[44] != 16 ||
+            width == 0 || height == 0 || width > JA2_SCREEN_WIDTH ||
+            height > JA2_SCREEN_HEIGHT || storedSize != (unsigned long)width * height * 2 ||
+            fileLength < 64 + storedSize) {
+            DebugLog("Startup: unsupported RGB STCI %ux%u depth=%u masks=%08lx/%08lx/%08lx stored=%lu",
+                     width, height, header[44], ReadLittleEndian32(&header[24]),
+                     ReadLittleEndian32(&header[28]), ReadLittleEndian32(&header[32]),
+                     storedSize);
+            free(fileData);
+            return 0;
+        }
+        SetGWorld(gMenuWorld, NULL);
+        menuPixMap = GetGWorldPixMap(gMenuWorld);
+        if (menuPixMap == NULL || !LockPixels(menuPixMap)) {
+            DebugLog("Startup: unable to lock RGB logo destination PixMap");
+            free(fileData);
+            return 0;
+        }
+        source = fileData + 64;
+        DebugLog("Startup: rendering RGB565 logo screen %ux%u (%lu bytes)",
+                 width, height, storedSize);
+        for (y = 0; y < height; ++y) {
+            for (x = 0; x < width; ++x) {
+                pixel = ReadLittleEndian16(source);
+                source += 2;
+                color.red = (unsigned short)(((pixel >> 11) * 65535UL) / 31);
+                color.green = (unsigned short)((((pixel >> 5) & 0x3f) * 65535UL) / 63);
+                color.blue = (unsigned short)(((pixel & 0x1f) * 65535UL) / 31);
+                WriteMenuPixel(menuPixMap, (short)x, (short)y, &color);
+            }
+        }
+        UnlockPixels(menuPixMap);
+        SetPort(gWindow);
+        free(fileData);
+        DebugLog("Startup: RGB565 logo render complete");
+        return 1;
+    }
+    if (!(ReadLittleEndian32(&header[16]) & 0x0008) ||
+        !(ReadLittleEndian32(&header[16]) & 0x0020) ||
+        ReadLittleEndian32(&header[24]) != 256) {
+        DebugLog("Startup: unsupported indexed STCI flags=%08lx colors=%lu",
+                 ReadLittleEndian32(&header[16]), ReadLittleEndian32(&header[24]));
+        free(fileData);
+        return 0;
+    }
+
+    memcpy(palette, fileData + 64, sizeof(palette));
+    memcpy(object, fileData + 64 + 768, sizeof(object));
+    offsetX = (short)ReadLittleEndian16(&object[8]);
+    offsetY = (short)ReadLittleEndian16(&object[10]);
+    height = ReadLittleEndian16(&object[12]);
+    width = ReadLittleEndian16(&object[14]);
+    dataOffset = ReadLittleEndian32(&object[0]);
+    dataLength = ReadLittleEndian32(&object[4]);
+    if (width == 0 || height == 0 || dataLength == 0 ||
+        offsetX < 0 || offsetY < 0 || offsetX + width > JA2_SCREEN_WIDTH ||
+        offsetY + height > JA2_SCREEN_HEIGHT ||
+        dataOffset > storedSize || dataOffset + dataLength > storedSize ||
+        fileLength < 64 + 768 + 16 + storedSize) {
+        DebugLog("Startup: invalid logo object %ux%u offset=%lu length=%lu stored=%lu",
+                 width, height, dataOffset, dataLength, storedSize);
+        free(fileData);
+        return 0;
+    }
+    pixels = (unsigned char *)malloc(storedSize);
+    if (pixels == NULL) {
+        DebugLog("Startup: unable to allocate %lu decoded logo bytes", storedSize);
+        free(fileData);
+        return 0;
+    }
+    memcpy(pixels, fileData + 64 + 768 + 16, storedSize);
+    free(fileData);
+
+    SetGWorld(gMenuWorld, NULL);
+    menuPixMap = GetGWorldPixMap(gMenuWorld);
+    if (menuPixMap == NULL || !LockPixels(menuPixMap)) {
+        DebugLog("Startup: unable to lock logo destination PixMap");
+        free(pixels);
+        return 0;
+    }
+    source = pixels + dataOffset;
+    DebugLog("Startup: rendering logo screen %ux%u", width, height);
+    for (y = 0; y < height; ++y) {
+        x = 0;
+        while (x < width &&
+               (unsigned long)(source - (pixels + dataOffset)) < dataLength) {
+            control = *source++;
+            if (control == 0) break;
+            run = (unsigned short)(control & 0x7f);
+            if (run == 0 || x + run > width) {
+                DebugLog("Startup: bad logo ETRLE run row=%u x=%u run=%u", y, x, run);
+                UnlockPixels(menuPixMap);
+                free(pixels);
+                return 0;
+            }
+            if (control & 0x80) {
+                x = (unsigned short)(x + run);
+            } else {
+                sourceUsed = (unsigned long)(source - (pixels + dataOffset));
+                if (sourceUsed + run > dataLength) {
+                    DebugLog("Startup: truncated logo ETRLE row=%u x=%u run=%u",
+                             y, x, run);
+                    UnlockPixels(menuPixMap);
+                    free(pixels);
+                    return 0;
+                }
+                while (run-- != 0) {
+                    paletteIndex = *source++;
+                    color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
+                    color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
+                    color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
+                    WriteMenuPixel(menuPixMap, (short)(offsetX + x),
+                                   (short)(offsetY + y), &color);
+                    ++x;
+                }
+            }
+        }
         if (x == width &&
             (unsigned long)(source - (pixels + dataOffset)) < dataLength &&
             *source == 0) {
@@ -598,7 +846,6 @@ static Boolean RenderMainMenuBackground(void)
     unsigned char control;
     unsigned char *source;
     RGBColor color;
-    QDErr worldError;
     PixMapHandle menuPixMap;
 
     DebugLog("Menu loader: opening LoadScreens.slf");
@@ -665,15 +912,9 @@ static Boolean RenderMainMenuBackground(void)
     free(fileData);
 
     source = pixels + dataOffset;
-    if (gMenuWorld == NULL) {
-        Rect worldBounds = { -40, -40, 560, 760 };
-        DebugLog("Menu loader: creating 32-bit 800x600 transfer world");
-        worldError = NewGWorld(&gMenuWorld, 32, &worldBounds, NULL, NULL, 0);
-        if (worldError != noErr || gMenuWorld == NULL) {
-            DebugLog("Menu loader: 32-bit NewGWorld failed error=%d", worldError);
-            free(pixels);
-            return 0;
-        }
+    if (!EnsureMenuWorld()) {
+        free(pixels);
+        return 0;
     }
     SetGWorld(gMenuWorld, NULL);
     menuPixMap = GetGWorldPixMap(gMenuWorld);
@@ -810,6 +1051,35 @@ static void DrawMainMenu(void)
     }
 }
 
+static void DrawJA2Shell(void);
+
+static void EnterMainMenu(void)
+{
+    gStartupActive = 0;
+    gMenuBlitLogged = 0;
+    /* The splash was drawn over the cached world; reload the original
+       background before restoring the menu logo and title graphics. */
+    gMenuBackgroundLoaded = RenderMainMenuBackground();
+    if (gMenuBackgroundLoaded) {
+        RenderMenuLogo();
+        gMenuButtonsLoaded = RenderMenuButtons();
+        BlitMenuBackground();
+        if (!gMenuButtonsLoaded) {
+            DrawMainMenu();
+        }
+    } else {
+        DrawJA2Shell();
+    }
+    DebugLog("Startup: entered main menu");
+}
+
+static void PollStartup(void)
+{
+    if (gStartupActive && TickCount() - gStartupStartTicks >= 60 * 4) {
+        EnterMainMenu();
+    }
+}
+
 static void HandleMainMenuClick(Point point)
 {
     short index;
@@ -907,7 +1177,9 @@ static void HandleJA2Event(const EventRecord *event)
         } else if (clicked == gWindow && part == inContent) {
             Point point = event->where;
             GlobalToLocal(&point);
-            HandleMainMenuClick(point);
+            if (!gStartupActive) {
+                HandleMainMenuClick(point);
+            }
         }
     } else if (event->what == updateEvt) {
         WindowPtr updatedWindow = (WindowPtr)event->message;
@@ -917,13 +1189,14 @@ static void HandleJA2Event(const EventRecord *event)
             EndUpdate(updatedWindow);
             return;
         }
-        if (gMenuBackgroundLoaded) {
+        if (gStartupActive || gMenuBackgroundLoaded) {
             BlitMenuBackground();
         } else {
             DrawJA2Shell();
         }
         EndUpdate(updatedWindow);
-        if (updatedWindow == gWindow && gMenuBackgroundLoaded && !gMenuButtonsLoaded) {
+        if (updatedWindow == gWindow && gMenuBackgroundLoaded &&
+            !gMenuButtonsLoaded && !gStartupActive) {
             /* The update region clips drawing. Restore controls after the
                region is ended so a moved window redraws every button. */
             DrawMainMenu();
@@ -981,19 +1254,19 @@ int main(void)
         ShowWindow(gDiagnosticsWindow);
         DrawDiagnostics();
     }
-    gMenuBackgroundLoaded = RenderMainMenuBackground();
-    if (gMenuBackgroundLoaded) {
-        RenderMenuLogo();
-        gMenuButtonsLoaded = RenderMenuButtons();
+    DebugLog("Startup: creating render world; attempting logo screen before menu load");
+    if (EnsureMenuWorld() && RenderStartupSplash()) {
+        gStartupActive = 1;
+        gStartupStartTicks = TickCount();
         BlitMenuBackground();
-        if (!gMenuButtonsLoaded) {
-            DrawMainMenu();
-        }
+        DebugLog("Startup: logo screen displayed for 4 seconds");
     } else {
-        DrawJA2Shell();
+        DebugLog("Startup: logo screen unavailable; skipping startup hold");
+        EnterMainMenu();
     }
 
     while (gRunning) {
+        PollStartup();
         if (WaitNextEvent(everyEvent, &event, 10, NULL)) {
             HandleJA2Event(&event);
         }
