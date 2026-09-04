@@ -8,12 +8,16 @@ static Boolean gDifficultyIronMan = 0;
 static Boolean gDifficultyBackgroundLoaded = 0;
 static Boolean gDifficultyPanelDarkened = 0;
 static Boolean gDifficultyControlsDrawn = 0;
+static Boolean gDifficultyButtonsDrawn = 0;
+
 
 void JA2ResetDifficultyScreen(void)
 {
     gDifficultyBackgroundLoaded = 0;
     gDifficultyPanelDarkened = 0;
     gDifficultyControlsDrawn = 0;
+    gDifficultyButtonsDrawn = 0;
+    InitCursor();
 }
 
 static void RestoreDifficultyCheckBoxes(void)
@@ -73,6 +77,23 @@ static void DrawDifficultyCheckBox(short x, short y, Boolean checked)
     }
 }
 
+static void DrawDifficultyButtons(void)
+{
+    RGBColor white = { 0xffff, 0xffff, 0xffff };
+
+    if (gDifficultyButtonsDrawn) return;
+    if (!JA2RenderInterfaceButton(0, 141, 418)) {
+        DebugLog("Difficulty: PreferencesButtons normal frame unavailable");
+    }
+    if (!JA2RenderInterfaceButton(1, 379, 418)) {
+        DebugLog("Difficulty: PreferencesButtons cancel frame unavailable");
+    }
+    RGBForeColor(&white);
+    DrawCString(188, 442, "Ok");
+    DrawCString(400, 442, "Abbrechen");
+    gDifficultyButtonsDrawn = 1;
+}
+
 void JA2DrawDifficultyScreen(void)
 {
     Rect shade;
@@ -81,7 +102,7 @@ void JA2DrawDifficultyScreen(void)
     RGBColor buttonFill = { 0x5140, 0x4930, 0x2700 };
     RGBColor buttonBorder = { 0xb000, 0xa000, 0x7000 };
 
-    HideCursor();
+    JA2InstallNormalCursor();
     gMenuRenderDirectToWindow = 1;
     JA2LogDifficultyRenderState("entry");
     if (!gDifficultyBackgroundLoaded) {
@@ -156,23 +177,9 @@ void JA2DrawDifficultyScreen(void)
     DrawDifficultyCheckBox(505, 311, !gDifficultySciFi);
     DrawDifficultyCheckBox(505, 346, gDifficultySciFi);
 
-    SetRect(&shade, 141, 418, 261, 454);
-    RGBForeColor(&buttonFill);
-    PaintRect(&shade);
-    RGBForeColor(&buttonBorder);
-    FrameRect(&shade);
-    FrameRect(&shade);
-    RGBForeColor(&white);
-    DrawCString(188, 442, "Ok");
-
-    SetRect(&shade, 379, 418, 499, 454);
-    RGBForeColor(&buttonFill);
-    PaintRect(&shade);
-    RGBForeColor(&buttonBorder);
-    FrameRect(&shade);
-    FrameRect(&shade);
-    RGBForeColor(&white);
-    DrawCString(400, 442, "Abbrechen");
+    (void)buttonFill;
+    (void)buttonBorder;
+    DrawDifficultyButtons();
     TextMode(srcCopy);
     gMenuRenderDirectToWindow = 0;
     JA2LogDifficultyRenderState("after controls");

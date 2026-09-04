@@ -3,6 +3,17 @@
 These instructions apply to every interaction that changes or evaluates the
 JA2 PPC codebase.
 
+## Repository
+
+Use the private JA2 PPC repository and no other remote for this port:
+
+```text
+https://github.com/bertibertig/ja2-ppc
+```
+
+Create issues, push branches, and open pull requests only against this
+repository. Do not use the upstream `dariusk/ja2` repository for port work.
+
 ## Porting Rule
 
 The PPC port must preserve the original x86 source organization 1:1.
@@ -88,6 +99,19 @@ for overlays, restore the expected transfer mode afterward, and reset the
 foreground color after helpers that change it. Add diagnostics for cache
 creation, archive decode, GWorld/window pixel samples, blits, redraw paths,
 and Toolbox allocation or locking failures when adding a new screen.
+
+Cursor handling follows the documented Cursor Manager lifecycle. Call
+`InitCursor` once when establishing the normal system cursor. Every
+`HideCursor` call must have exactly one matching `ShowCursor`; do not hide the
+cursor repeatedly from a frame or mouse-poll function. `SetCursor` accepts the
+classic one-bit `Cursor` structure and cannot reproduce a red game cursor.
+For a colored JA2 cursor, follow the original game's mouse-buffer model:
+decode the cursor sprite into an off-screen cursor buffer, composite it with
+the frame, and restore the previous cursor area from a valid backing surface.
+Do not paint a software cursor directly into the window and do not restore it
+by raw writes into a window PixMap. Consult the local `Quickdraw.h` Cursor
+Manager documentation and `pdf/animated_cursor.pdf` before changing cursor
+ownership or animation.
 
 ## Verification
 

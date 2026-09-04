@@ -934,6 +934,218 @@ static Boolean RenderMenuButtons(void)
     return RenderMenuButtonFrames(0, 4, gMenuHoverButton);
 }
 
+Boolean JA2RenderInterfaceButton(short objectIndex, short x, short y)
+{
+    JA2SLFArchive *archive;
+    unsigned char *fileData;
+    unsigned char palette[768];
+    unsigned char *pixels;
+    unsigned long fileOffset;
+    unsigned long fileLength;
+    unsigned long storedSize;
+    unsigned long dataOffset;
+    unsigned long dataLength;
+    unsigned short objectCount;
+    unsigned short imageWidth;
+    unsigned short imageHeight;
+    unsigned short row;
+    unsigned short column;
+    unsigned short run;
+    unsigned char control;
+    PixMapHandle pixMap;
+    unsigned char *source;
+
+    if (objectIndex < 0) return 0;
+    archive = JA2SLFOpen("Interface.slf");
+    if (archive == NULL || !JA2SLFFind(archive, "PreferencesButtons.sti",
+                                       &fileOffset, &fileLength)) {
+        if (archive != NULL) JA2SLFClose(archive);
+        DebugLog("Button loader: PreferencesButtons.sti unavailable");
+        return 0;
+    }
+    fileData = (unsigned char *)malloc(fileLength);
+    if (fileData == NULL || !JA2SLFRead(archive, fileOffset, fileData, fileLength)) {
+        free(fileData);
+        JA2SLFClose(archive);
+        DebugLog("Button loader: cannot read PreferencesButtons.sti length=%lu",
+                 fileLength);
+        return 0;
+    }
+    JA2SLFClose(archive);
+    storedSize = ReadLittleEndian32(&fileData[8]);
+    objectCount = ReadLittleEndian16(&fileData[28]);
+    if (memcmp(fileData, "STCI", 4) != 0 || objectCount <= (unsigned short)objectIndex ||
+        ReadLittleEndian32(&fileData[24]) != 256 ||
+        fileLength < 64 + 768 + (unsigned long)objectCount * 16 + storedSize) {
+        free(fileData);
+        DebugLog("Button loader: invalid PreferencesButtons.sti object=%d count=%u",
+                 objectIndex, objectCount);
+        return 0;
+    }
+    memcpy(palette, fileData + 64, sizeof(palette));
+    pixels = fileData + 64 + 768 + (unsigned long)objectCount * 16;
+    {
+        const unsigned char *object = fileData + 64 + 768 +
+                                       (unsigned long)objectIndex * 16;
+        dataOffset = ReadLittleEndian32(&object[0]);
+        dataLength = ReadLittleEndian32(&object[4]);
+        imageHeight = ReadLittleEndian16(&object[12]);
+        imageWidth = ReadLittleEndian16(&object[14]);
+    }
+    if (imageWidth == 0 || imageHeight == 0 || dataOffset + dataLength > storedSize) {
+        free(fileData);
+        DebugLog("Button loader: invalid object=%d size=%ux%u offset=%lu length=%lu",
+                 objectIndex, imageWidth, imageHeight, dataOffset, dataLength);
+        return 0;
+    }
+    pixMap = GetMenuRenderPixMap();
+    if (pixMap == NULL || !LockPixels(pixMap)) {
+        free(fileData);
+        DebugLog("Button loader: cannot lock destination for object=%d", objectIndex);
+        return 0;
+    }
+    source = pixels + dataOffset;
+    for (row = 0; row < imageHeight; ++row) {
+        column = 0;
+        while (column < imageWidth &&
+               (unsigned long)(source - (pixels + dataOffset)) < dataLength) {
+            control = *source++;
+            if (control == 0) break;
+            run = (unsigned short)(control & 0x7f);
+            if (run == 0 || column + run > imageWidth) {
+                UnlockPixels(pixMap);
+                free(fileData);
+                return 0;
+            }
+            if (control & 0x80) {
+                column = (unsigned short)(column + run);
+            } else {
+                if ((unsigned long)(source - (pixels + dataOffset)) + run > dataLength) {
+                    UnlockPixels(pixMap);
+                    free(fileData);
+                    return 0;
+                }
+                while (run-- != 0) {
+                    RGBColor color;
+                    unsigned char paletteIndex = *source++;
+                    color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
+                    color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
+                    color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
+                    WriteMenuPixel(pixMap, (short)(x + column), (short)(y + row), &color);
+                    ++column;
+                }
+            }
+        }
+        if (column == imageWidth &&
+            (unsigned long)(source - (pixels + dataOffset)) < dataLength && *source == 0) {
+            ++source;
+        }
+    }
+    UnlockPixels(pixMap);
+    SetPort(gWindow);
+    free(fileData);
+    DebugLog("Button loader: rendered PreferencesButtons object=%d at %d,%d size=%ux%u",
+             objectIndex, x, y, imageWidth, imageHeight);
+    return 1;
+}
+
+Boolean JA2InstallNormalCursor(void)
+{
+    JA2SLFArchive *archive;
+    unsigned char *fileData;
+    unsigned char *pixels;
+    unsigned char *source;
+    unsigned long fileOffset;
+    unsigned long fileLength;
+    unsigned long storedSize;
+    unsigned long dataOffset;
+    unsigned long dataLength;
+    unsigned short objectCount;
+    unsigned short width;
+    unsigned short height;
+    unsigned short row;
+    unsigned short column;
+    unsigned short run;
+    unsigned char control;
+    Cursor cursor;
+
+    archive = JA2SLFOpen("Cursors.slf");
+    if (archive == NULL || !JA2SLFFind(archive, "CURSOR.STI", &fileOffset, &fileLength)) {
+        if (archive != NULL) JA2SLFClose(archive);
+        DebugLog("Cursor loader: CURSOR.STI unavailable; using Toolbox cursor");
+        InitCursor();
+        return 0;
+    }
+    fileData = (unsigned char *)malloc(fileLength);
+    if (fileData == NULL || !JA2SLFRead(archive, fileOffset, fileData, fileLength)) {
+        free(fileData);
+        JA2SLFClose(archive);
+        DebugLog("Cursor loader: cannot read CURSOR.STI length=%lu", fileLength);
+        InitCursor();
+        return 0;
+    }
+    JA2SLFClose(archive);
+    storedSize = ReadLittleEndian32(&fileData[8]);
+    objectCount = ReadLittleEndian16(&fileData[28]);
+    if (memcmp(fileData, "STCI", 4) != 0 || objectCount == 0 ||
+        ReadLittleEndian32(&fileData[24]) != 256 ||
+        fileLength < 64 + 768 + (unsigned long)objectCount * 16 + storedSize) {
+        free(fileData);
+        DebugLog("Cursor loader: invalid CURSOR.STI object count=%u", objectCount);
+        InitCursor();
+        return 0;
+    }
+    {
+        const unsigned char *object = fileData + 64 + 768;
+        dataOffset = ReadLittleEndian32(&object[0]);
+        dataLength = ReadLittleEndian32(&object[4]);
+        height = ReadLittleEndian16(&object[12]);
+        width = ReadLittleEndian16(&object[14]);
+    }
+    if (width == 0 || height == 0 || width > 16 || height > 16 ||
+        dataOffset + dataLength > storedSize) {
+        free(fileData);
+        DebugLog("Cursor loader: unsupported cursor size=%ux%u", width, height);
+        InitCursor();
+        return 0;
+    }
+    memset(&cursor, 0, sizeof(cursor));
+    cursor.hotSpot.h = 0;
+    cursor.hotSpot.v = 0;
+    pixels = fileData + 64 + 768 + (unsigned long)objectCount * 16;
+    source = pixels + dataOffset;
+    for (row = 0; row < height; ++row) {
+        column = 0;
+        while (column < width &&
+               (unsigned long)(source - (pixels + dataOffset)) < dataLength) {
+            control = *source++;
+            if (control == 0) break;
+            run = (unsigned short)(control & 0x7f);
+            if (run == 0 || column + run > width) break;
+            if (control & 0x80) {
+                column = (unsigned short)(column + run);
+            } else {
+                while (run-- != 0 &&
+                       (unsigned long)(source - (pixels + dataOffset)) < dataLength) {
+                    unsigned char paletteIndex = *source++;
+                    unsigned short bit = (unsigned short)(0x8000 >> column);
+                    unsigned short brightness =
+                        (unsigned short)fileData[64 + paletteIndex * 3] +
+                        (unsigned short)fileData[64 + paletteIndex * 3 + 1] +
+                        (unsigned short)fileData[64 + paletteIndex * 3 + 2];
+                    cursor.mask[row] |= bit;
+                    if (brightness > 384) cursor.data[row] |= bit;
+                    ++column;
+                }
+            }
+        }
+    }
+    free(fileData);
+    SetCursor(&cursor);
+    DebugLog("Cursor loader: installed CURSOR.STI normal cursor size=%ux%u", width, height);
+    return 1;
+}
+
 static void BlitWorldToWindow(GWorldPtr world, const char *name)
 {
     Rect sourceBounds;
@@ -2000,8 +2212,8 @@ int main(void)
         PollStartup();
         JA2MenuMusicPoll();
         UpdateMainMenuHover();
-        PollCredits();
-        if (WaitNextEvent(everyEvent, &event,
+            PollCredits();
+            if (WaitNextEvent(everyEvent, &event,
                           gMenuScreen == MENU_SCREEN_CREDITS ? 1 : 10, NULL)) {
             HandleJA2Event(&event);
         }

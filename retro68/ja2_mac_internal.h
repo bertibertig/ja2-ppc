@@ -39,6 +39,8 @@ void DrawCString(short x, short y, const char *text);
 void RestoreMainMenu(void);
 void JA2BlitMenuBackground(void);
 void JA2LogDifficultyRenderState(const char *stage);
+Boolean JA2RenderInterfaceButton(short objectIndex, short x, short y);
+Boolean JA2InstallNormalCursor(void);
 
 Boolean JA2InitializeNewGame(void);
 void JA2DrawDifficultyScreen(void);
