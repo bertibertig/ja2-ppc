@@ -5,6 +5,13 @@ PowerPC port. It builds a classic `APPL` using Retro68's
 `powerpc-apple-macos` toolchain and replaces the original Win32/DirectDraw
 window and event loop with QuickDraw and `WaitNextEvent`.
 
+The PPC sources are kept in the same subsystem boundaries as the original
+source where they have been migrated: `ja2_mac.c` contains the platform shell
+and event loop, `ja2_game_init_options.c` contains the game-start options
+screen, and `ja2_new_game_init.c` contains the first PPC `InitNewGame(FALSE)`
+boundary. Their headers expose only the small interfaces needed between these
+subsystems.
+
 The checked-in game source is not yet a complete Mac port. The historical
 source calls Win32, DirectDraw, DirectSound, Miles Sound System, registry,
 and other APIs throughout the SGP and game modules. The original game data
@@ -58,6 +65,23 @@ the archive names.
 The window reports the number of required `.slf` archives it can open.
 It also reads the little-endian `Data.slf` directory on PPC without relying
 on x86 struct layout and reports the number of valid indexed entries.
+
+## New Game test slice
+
+In the German debug build, select `Neues Spiel` from the main menu. The PPC
+shell now performs the first-run portion of the original `InitNewGame(FALSE)`
+flow: it records the laptop and strategic initialization boundary, sets the
+new-game flag, queues the five opening emails, selects medium difficulty with
+35,000 starting cash, selects A9 Omerta, and marks the campaign started. The
+screen displays these values as a testable result. The actual laptop and
+strategic subsystems remain future migration work and are explicitly reported
+as such in the diagnostics.
+
+The debug build writes `JA2PPC-Debug.log` beside the application and mirrors
+the messages in the `JA2 Debug` window. For a New Game failure, capture the
+log from `German main menu: new game selected` through the final `New Game:`
+phase message. The log includes the selected difficulty, starting cash,
+opening-email count, initial sector, game-started flag, and transition target.
 
 ## Remaining port work
 

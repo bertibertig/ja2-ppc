@@ -19,6 +19,11 @@ endif()
 
 add_application(JA2PPC
     ja2_mac.c
+    ja2_mac_internal.h
+    ja2_game_init_options.c
+    ja2_game_init_options.h
+    ja2_new_game_init.c
+    ja2_new_game_init.h
     ja2_music.c
     ja2_music.h
     ja2_slf.c

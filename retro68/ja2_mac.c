@@ -18,6 +18,8 @@
 
 #include "ja2_music.h"
 #include "ja2_slf.h"
+#include "ja2_mac_internal.h"
+#include "ja2_game_init_options.h"
 
 #define JA2_SCREEN_WIDTH 640
 #define JA2_SCREEN_HEIGHT 480
@@ -42,17 +44,17 @@
 #define MENU_MISSING_TEXT "Main menu graphic missing"
 #endif
 
-static WindowPtr gWindow;
+WindowPtr gWindow;
 static WindowPtr gDiagnosticsWindow;
 static Boolean gRunning = 1;
 static Boolean gMenuBackgroundLoaded = 0;
 static Boolean gMenuButtonsLoaded = 0;
-static GWorldPtr gMenuWorld;
+GWorldPtr gMenuWorld;
 static GWorldPtr gCreditsWorld;
 static Boolean gMenuBlitLogged = 0;
-static Boolean gMenuRenderDirectToWindow = 0;
+Boolean gMenuRenderDirectToWindow = 0;
 static Boolean gMainMenuNeedsRender = 0;
-static Boolean gActionScreenNeedsRender = 0;
+Boolean gActionScreenNeedsRender = 0;
 static short gMenuButton = -1;
 static short gMenuHoverButton = -1;
 static Boolean gStartupActive = 0;
@@ -69,16 +71,8 @@ static char gDiagnosticsText[4096];
 static unsigned short gDiagnosticsLength;
 static Boolean gDrawingDiagnostics;
 
-enum {
-    MENU_SCREEN_MAIN,
-    MENU_SCREEN_NEW_GAME,
-    MENU_SCREEN_LOAD_GAME,
-    MENU_SCREEN_OPTIONS,
-    MENU_SCREEN_CREDITS
-};
-
-static short gMenuScreen = MENU_SCREEN_MAIN;
-static void RestoreMainMenu(void);
+short gMenuScreen = MENU_SCREEN_MAIN;
+void RestoreMainMenu(void);
 
 typedef struct {
     short x;
@@ -123,7 +117,7 @@ static const char *gCredits[] = {
 };
 static const short gCreditsCount = sizeof(gCredits) / sizeof(gCredits[0]);
 
-static void DebugLog(const char *format, ...);
+void DebugLog(const char *format, ...);
 
 static PixMapHandle GetMenuRenderPixMap(void)
 {
@@ -171,7 +165,7 @@ static void LogPixMapSamples(const char *name, PixMapHandle pixMap)
     UnlockPixels(pixMap);
 }
 
-static void DebugLog(const char *format, ...)
+void DebugLog(const char *format, ...)
 {
     va_list arguments;
     char line[256];
@@ -1036,9 +1030,32 @@ static void BlitWorldToWindow(GWorldPtr world, const char *name)
     SetGWorld(savedPort, savedDevice);
 }
 
-static void BlitMenuBackground(void)
+void JA2BlitMenuBackground(void)
 {
     BlitWorldToWindow(gMenuWorld, "menu background");
+}
+
+void JA2LogDifficultyRenderState(const char *stage)
+{
+    CGrafPtr currentPort;
+    GDHandle currentDevice;
+    PixMapHandle cachePixMap = NULL;
+    PixMapHandle windowPixMap = NULL;
+
+    GetGWorld(&currentPort, &currentDevice);
+    if (gMenuWorld != NULL) {
+        cachePixMap = GetGWorldPixMap(gMenuWorld);
+    }
+    if (gWindow != NULL) {
+        windowPixMap = ((CWindowPtr)gWindow)->portPixMap;
+    }
+    DebugLog("Difficulty render: %s currentPort=%p device=%p window=%p cache=%p textMode=%d",
+             stage, currentPort, currentDevice, gWindow, gMenuWorld,
+             gWindow == NULL ? -1 : ((CGrafPtr)gWindow)->txMode);
+    LogPixMap("difficulty cache", cachePixMap);
+    LogPixMap("difficulty window", windowPixMap);
+    LogPixMapSamples("difficulty cache", cachePixMap);
+    LogPixMapSamples("difficulty window", windowPixMap);
 }
 
 static Boolean CopyWorld(GWorldPtr sourceWorld, GWorldPtr destinationWorld)
@@ -1069,7 +1086,7 @@ static Boolean CopyWorld(GWorldPtr sourceWorld, GWorldPtr destinationWorld)
     return 1;
 }
 
-static Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
+Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
 {
     JA2SLFArchive *archive;
     unsigned char *fileData;
@@ -1250,7 +1267,7 @@ static Boolean RenderMainMenuBackground(void)
     return RenderIndexedBackground("LoadScreens.slf", "MAINMENUBACKGROUND.STI");
 }
 
-static void DrawCString(short x, short y, const char *text)
+void DrawCString(short x, short y, const char *text)
 {
     Str255 pascalText;
     short length = (short)strlen(text);
@@ -1591,7 +1608,17 @@ static void DrawMenuActionScreen(void)
     RGBColor background = { 0x1200, 0x1600, 0x2200 };
     RGBColor accent = { 0xd900, 0x9b00, 0x4500 };
     RGBColor white = { 0xffff, 0xffff, 0xffff };
-    short action = (short)(gMenuScreen - MENU_SCREEN_NEW_GAME);
+    short action;
+    char status[96];
+
+    if (gMenuScreen == MENU_SCREEN_DIFFICULTY) {
+        JA2DrawDifficultyScreen();
+        return;
+    }
+    action = (short)(gMenuScreen - MENU_SCREEN_NEW_GAME);
+    if (gMenuScreen > MENU_SCREEN_DIFFICULTY) {
+        --action;
+    }
 
     HideCursor();
     SetGWorld((CGrafPtr)gWindow, GetMainDevice());
@@ -1605,8 +1632,19 @@ static void DrawMenuActionScreen(void)
     DrawCString(60, 110, titles[action]);
     TextSize(13);
     RGBForeColor(&white);
-    DrawCString(60, 160, details[action]);
-    DrawCString(60, 210, "ESC: Zurueck zum Hauptmenue");
+    if (gMenuScreen == MENU_SCREEN_NEW_GAME && gNewGameState == NEW_GAME_READY) {
+        DrawCString(60, 160, "Kampagne initialisiert. Laptop-Bildschirm folgt.");
+        sprintf(status, "Startkapital: %ld   Eroeffnungs-E-Mails: %d",
+                gNewGameStartingCash, gNewGameOpeningEmails);
+        DrawCString(60, 190, status);
+        sprintf(status, "Startsektor: A9 Omerta (%d,%d,0)",
+                gNewGameSectorX, gNewGameSectorY);
+        DrawCString(60, 212, status);
+        DrawCString(60, 250, "ESC: Zurueck zum Hauptmenue");
+    } else {
+        DrawCString(60, 160, details[action]);
+        DrawCString(60, 210, "ESC: Zurueck zum Hauptmenue");
+    }
     ShowCursor();
 }
 
@@ -1645,7 +1683,7 @@ static void EnterMainMenu(void)
     DebugLog("Startup: entered main menu");
 }
 
-static void RestoreMainMenu(void)
+void RestoreMainMenu(void)
 {
     DebugLog("Main menu: restoring from screen %d", gMenuScreen);
     if (gMenuScreen == MENU_SCREEN_CREDITS && gCreditsWorld != NULL) {
@@ -1726,8 +1764,9 @@ static void HandleMainMenuClick(Point point)
                      point.h, point.v, index);
             switch (index) {
                 case 0:
-                    gMenuScreen = MENU_SCREEN_NEW_GAME;
                     DebugLog("German main menu: new game selected");
+                    gMenuScreen = MENU_SCREEN_DIFFICULTY;
+                    DebugLog("Difficulty: entering GameInitOptionsScreen PPC implementation");
                     break;
                 case 1:
                     gMenuScreen = MENU_SCREEN_LOAD_GAME;
@@ -1748,7 +1787,12 @@ static void HandleMainMenuClick(Point point)
             }
             if (gMenuScreen != MENU_SCREEN_MAIN && gMenuScreen != MENU_SCREEN_CREDITS) {
                 gActionScreenNeedsRender = 1;
-                DrawMenuActionScreen();
+                if (gMenuScreen == MENU_SCREEN_DIFFICULTY) {
+                    JA2DrawDifficultyScreen();
+                    gActionScreenNeedsRender = 0;
+                } else {
+                    DrawMenuActionScreen();
+                }
             }
             return;
     }
@@ -1818,7 +1862,13 @@ static void HandleJA2Event(const EventRecord *event)
     if (event->what == keyDown || event->what == autoKey) {
         key = (char)(event->message & charCodeMask);
         DebugLog("Input: key=%d screen=%d", (unsigned char)key, gMenuScreen);
-        if (gMenuScreen != MENU_SCREEN_MAIN && (key == 27 || key == 'b' || key == 'B')) {
+        if (gMenuScreen == MENU_SCREEN_DIFFICULTY && key == 13) {
+            Point point = { 200, 430 };
+            JA2HandleDifficultyClick(point);
+        } else if (gMenuScreen != MENU_SCREEN_MAIN && (key == 27 || key == 'b' || key == 'B')) {
+            if (gMenuScreen == MENU_SCREEN_DIFFICULTY) {
+                JA2ResetDifficultyScreen();
+            }
             RestoreMainMenu();
         } else if (key == 'q' || key == 'Q' || (event->modifiers & cmdKey)) {
             gRunning = 0;
@@ -1839,6 +1889,8 @@ static void HandleJA2Event(const EventRecord *event)
             GlobalToLocal(&point);
             if (!gStartupActive && gMenuScreen == MENU_SCREEN_MAIN) {
                 HandleMainMenuClick(point);
+            } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_DIFFICULTY) {
+                JA2HandleDifficultyClick(point);
             }
         }
     } else if (event->what == updateEvt) {
@@ -1867,7 +1919,7 @@ static void HandleJA2Event(const EventRecord *event)
         if (updatedWindow == gWindow && redrawMenuAfterUpdate) {
             /* Copy after EndUpdate so QuickDraw cannot clear the new frame as
                part of finalizing the invalidated content region. */
-            BlitMenuBackground();
+            JA2BlitMenuBackground();
         }
         if (updatedWindow == gWindow && gMainMenuNeedsRender) {
             gMainMenuNeedsRender = 0;
@@ -1937,7 +1989,7 @@ int main(void)
     if (EnsureMenuWorld() && RenderStartupSplash()) {
         gStartupActive = 1;
         gStartupStartTicks = TickCount();
-        BlitMenuBackground();
+        JA2BlitMenuBackground();
         DebugLog("Startup: logo screen displayed for 4 seconds");
     } else {
         DebugLog("Startup: logo screen unavailable; skipping startup hold");
