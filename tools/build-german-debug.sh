@@ -30,7 +30,7 @@ configure() {
 
 build() {
     [[ -f "$BUILD_DIR/CMakeCache.txt" ]] || configure
-    cmake --build "$BUILD_DIR" --clean-first
+    cmake --build "$BUILD_DIR"
 }
 
 case "${1:-all}" in

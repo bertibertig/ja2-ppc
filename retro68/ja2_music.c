@@ -301,3 +301,8 @@ void JA2MenuMusicShutdown(void)
     gMusicFadingIn = 0;
     gMusicStatusLogged = 0;
 }
+
+void JA2MenuMusicStop(void)
+{
+    JA2MenuMusicShutdown();
+}

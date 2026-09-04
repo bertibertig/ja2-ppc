@@ -83,6 +83,13 @@ log from `German main menu: new game selected` through the final `New Game:`
 phase message. The log includes the selected difficulty, starting cash,
 opening-email count, initial sector, game-started flag, and transition target.
 
+When `JA2_DATA_DIR` is configured, the build extracts the four beginning-game
+Smacker files from `Data/Intro.slf` and converts them to cached 640x480 MOV
+files under `Data/Intro/` in the bundle. FFmpeg is required for this step.
+The cache is reused by normal incremental builds; use `cmake --build
+retro68/build-german-debug --clean-first` only when a deliberate full rebuild
+is needed.
+
 ## Remaining port work
 
 - Replace DirectDraw surfaces with the QuickDraw GWorld/frame-buffer path.

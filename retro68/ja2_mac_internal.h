@@ -8,6 +8,7 @@ enum {
     MENU_SCREEN_MAIN,
     MENU_SCREEN_NEW_GAME,
     MENU_SCREEN_DIFFICULTY,
+    MENU_SCREEN_INTRO,
     MENU_SCREEN_LOAD_GAME,
     MENU_SCREEN_OPTIONS,
     MENU_SCREEN_CREDITS
@@ -38,6 +39,12 @@ Boolean RenderIndexedBackground(const char *archiveName, const char *fileName);
 void DrawCString(short x, short y, const char *text);
 void RestoreMainMenu(void);
 void JA2BlitMenuBackground(void);
+void JA2BlitWorldToWindow(GWorldPtr world, const char *name);
+void JA2PPCIntroPoll(void);
+void JA2PPCIntroUpdate(void);
+void JA2PPCIntroSkip(void);
+void JA2PPCIntroShutdown(void);
+void JA2PPCVideoShutdown(void);
 void JA2LogDifficultyRenderState(const char *stage);
 Boolean JA2RenderInterfaceButton(short objectIndex, short x, short y);
 Boolean JA2InstallNormalCursor(void);

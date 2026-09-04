@@ -1,5 +1,6 @@
 #include "ja2_mac_internal.h"
 #include "ja2_game_init_options.h"
+#include "ja2/Build/Intro.h"
 
 static short gDifficultySelection = 0;
 static Boolean gDifficultySciFi = 1;
@@ -223,9 +224,13 @@ void JA2HandleDifficultyClick(Point point)
         DebugLog("Difficulty: OK difficulty=%d extraWeapons=%d ironMan=%d sciFi=%d",
                  gDifficultySelection, gDifficultyExtraWeapons,
                  gDifficultyIronMan, gDifficultySciFi);
-        gMenuScreen = MENU_SCREEN_NEW_GAME;
-        if (!JA2InitializeNewGame()) {
-            DebugLog("New Game: initialization failed after difficulty confirmation");
+        gMenuScreen = MENU_SCREEN_INTRO;
+        if (!JA2PPCIntroStart()) {
+            DebugLog("Intro: unavailable; falling back to New Game initialization");
+            gMenuScreen = MENU_SCREEN_NEW_GAME;
+            if (!JA2InitializeNewGame()) {
+                DebugLog("New Game: initialization failed after intro fallback");
+            }
         }
         gActionScreenNeedsRender = 1;
         return;

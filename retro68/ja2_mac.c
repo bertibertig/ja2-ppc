@@ -1146,7 +1146,7 @@ Boolean JA2InstallNormalCursor(void)
     return 1;
 }
 
-static void BlitWorldToWindow(GWorldPtr world, const char *name)
+void JA2BlitWorldToWindow(GWorldPtr world, const char *name)
 {
     Rect sourceBounds;
     Rect destinationBounds;
@@ -1244,7 +1244,7 @@ static void BlitWorldToWindow(GWorldPtr world, const char *name)
 
 void JA2BlitMenuBackground(void)
 {
-    BlitWorldToWindow(gMenuWorld, "menu background");
+    JA2BlitWorldToWindow(gMenuWorld, "menu background");
 }
 
 void JA2LogDifficultyRenderState(const char *stage)
@@ -2074,7 +2074,10 @@ static void HandleJA2Event(const EventRecord *event)
     if (event->what == keyDown || event->what == autoKey) {
         key = (char)(event->message & charCodeMask);
         DebugLog("Input: key=%d screen=%d", (unsigned char)key, gMenuScreen);
-        if (gMenuScreen == MENU_SCREEN_DIFFICULTY && key == 13) {
+        if (gMenuScreen == MENU_SCREEN_INTRO &&
+            (key == 27 || key == ' ')) {
+            JA2PPCIntroSkip();
+        } else if (gMenuScreen == MENU_SCREEN_DIFFICULTY && key == 13) {
             Point point = { 200, 430 };
             JA2HandleDifficultyClick(point);
         } else if (gMenuScreen != MENU_SCREEN_MAIN && (key == 27 || key == 'b' || key == 'B')) {
@@ -2099,7 +2102,9 @@ static void HandleJA2Event(const EventRecord *event)
             Point point = event->where;
             SetPort(gWindow);
             GlobalToLocal(&point);
-            if (!gStartupActive && gMenuScreen == MENU_SCREEN_MAIN) {
+            if (!gStartupActive && gMenuScreen == MENU_SCREEN_INTRO) {
+                JA2PPCIntroSkip();
+            } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_MAIN) {
                 HandleMainMenuClick(point);
             } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_DIFFICULTY) {
                 JA2HandleDifficultyClick(point);
@@ -2119,6 +2124,8 @@ static void HandleJA2Event(const EventRecord *event)
             redrawMenuAfterUpdate = gStartupActive;
         } else if (gMenuScreen == MENU_SCREEN_CREDITS) {
             DrawCreditsScreen();
+        } else if (gMenuScreen == MENU_SCREEN_INTRO) {
+            JA2PPCIntroUpdate();
         } else if (gMenuScreen != MENU_SCREEN_MAIN) {
             if (gActionScreenNeedsRender) {
                 gActionScreenNeedsRender = 0;
@@ -2155,6 +2162,8 @@ int main(void)
     Rect diagnosticsBounds = { 80, 80, 320, 560 };
 
     InitGraf(&qd.thePort);
+    MaxApplZone();
+    DebugLog("Memory: expanded application zone free=%ld bytes", (long)FreeMem());
     InitFonts();
     InitWindows();
     InitMenus();
@@ -2212,9 +2221,11 @@ int main(void)
         PollStartup();
         JA2MenuMusicPoll();
         UpdateMainMenuHover();
-            PollCredits();
-            if (WaitNextEvent(everyEvent, &event,
-                          gMenuScreen == MENU_SCREEN_CREDITS ? 1 : 10, NULL)) {
+        PollCredits();
+        JA2PPCIntroPoll();
+        if (WaitNextEvent(everyEvent, &event,
+                          (gMenuScreen == MENU_SCREEN_CREDITS ||
+                           gMenuScreen == MENU_SCREEN_INTRO) ? 1 : 10, NULL)) {
             HandleJA2Event(&event);
         }
     }
@@ -2226,6 +2237,8 @@ int main(void)
     if (gDiagnosticsWindow != NULL) {
         DisposeWindow(gDiagnosticsWindow);
     }
+    JA2PPCIntroShutdown();
+    JA2PPCVideoShutdown();
     JA2MenuMusicShutdown();
     DisposeWindow(window);
     return 0;
