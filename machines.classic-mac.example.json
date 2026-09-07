@@ -1,0 +1,21 @@
+{
+  "powerbook-g3": {
+    "name": "PowerBook G3",
+    "platform": "opentransport",
+    "system": "Mac OS 9.2.2",
+    "cpu": "PowerPC G3",
+    "ram": "actual RAM amount",
+    "build": "standard",
+    "ftp": {
+      "host": "192.168.1.42",
+      "port": 21,
+      "username": "mac",
+      "password": "${CLASSIC_MAC_FTP_PASSWORD}"
+    },
+    "launchappl": {
+      "host": "192.168.1.42",
+      "port": 1984
+    },
+    "notes": "Replace the address, RAM, and FTP username/password before use. Keep this machine on a trusted LAN."
+  }
+}

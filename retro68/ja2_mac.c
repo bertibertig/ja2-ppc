@@ -11,6 +11,8 @@
 #include <Windows.h>
 #include <Events.h>
 #include <Menus.h>
+#include <Files.h>
+#include <Palettes.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -33,6 +35,10 @@
 #define ENTRY_FORMAT "Data.slf-Dateien indiziert: %d"
 #define MENU_FOUND_TEXT "Hauptmenue-Grafik gefunden"
 #define MENU_MISSING_TEXT "Hauptmenue-Grafik fehlt"
+#define WORKING_DIRECTORY_TEXT "Arbeitsverzeichnis:"
+#define DATA_PATH_FORMAT "Relativer Datenpfad: :Data:Data.slf"
+#define DATA_LOCATION_TEXT "Data-Ordner: neben JA2PPC ablegen"
+#define INI_LOCATION_TEXT "JA2.ini: neben JA2PPC ablegen (noch nicht gelesen)"
 #else
 #define WINDOW_TITLE "\pJA2 PPC"
 #define PLATFORM_TEXT "\pPowerPC / System 9 platform shell"
@@ -42,6 +48,10 @@
 #define ENTRY_FORMAT "Data.slf files indexed: %d"
 #define MENU_FOUND_TEXT "Main menu graphic found"
 #define MENU_MISSING_TEXT "Main menu graphic missing"
+#define WORKING_DIRECTORY_TEXT "Working directory:"
+#define DATA_PATH_FORMAT "Relative data path: :Data:Data.slf"
+#define DATA_LOCATION_TEXT "Put the Data folder beside JA2PPC"
+#define INI_LOCATION_TEXT "Put JA2.ini beside JA2PPC (not read yet)"
 #endif
 
 WindowPtr gWindow;
@@ -73,6 +83,7 @@ static Boolean gDrawingDiagnostics;
 
 short gMenuScreen = MENU_SCREEN_MAIN;
 void RestoreMainMenu(void);
+static void RenderMainMenuDirectly(void);
 
 typedef struct {
     short x;
@@ -125,8 +136,46 @@ static PixMapHandle GetMenuRenderPixMap(void)
         SetPort(gWindow);
         return ((CWindowPtr)gWindow)->portPixMap;
     }
+    if (gMenuScreen == MENU_SCREEN_CREDITS && gCreditsWorld != NULL) {
+        SetGWorld(gCreditsWorld, NULL);
+        return GetGWorldPixMap(gCreditsWorld);
+    }
     SetGWorld(gMenuWorld, NULL);
     return GetGWorldPixMap(gMenuWorld);
+}
+
+static void SetAllDisplayDepths(void)
+{
+    GDHandle device;
+    OSErr error;
+    short deviceIndex = 0;
+
+    /* The original renderer selects a native 16-bit format per display.
+       Classic QuickDraw uses RGB555 GWorlds on this PowerBook. */
+    for (device = GetDeviceList(); device != NULL;
+         device = GetNextDevice(device), ++deviceIndex) {
+        if ((**device).gdFlags & screenDevice) {
+            error = SetDepth(device, 16, 0, 0);
+            DebugLog("Display depth: device=%d handle=%p result=%d depth=%d",
+                     deviceIndex, device, error, (**device).gdPMap == NULL ? 0 :
+                     (**(**device).gdPMap).pixelSize);
+        }
+    }
+}
+
+static void SelectWindowGWorld(void)
+{
+    CGrafPtr currentPort;
+    GDHandle windowDevice;
+
+    /* GetMainDevice() is not necessarily the device owning this window when
+       the PowerBook LCD and VGA display are mirrored or reordered. */
+    SetPort(gWindow);
+    GetGWorld(&currentPort, &windowDevice);
+    if (windowDevice == NULL) {
+        windowDevice = GetMainDevice();
+    }
+    SetGWorld((CGrafPtr)gWindow, windowDevice);
 }
 
 static void LogPixMap(const char *name, PixMapHandle pixMap)
@@ -156,11 +205,16 @@ static void LogPixMapSamples(const char *name, PixMapHandle pixMap)
     base = (unsigned char *)GetPixBaseAddr(pixMap);
     rowBytes = (**pixMap).rowBytes & 0x3fff;
     for (index = 0; index < 4; ++index) {
-        unsigned char *pixel = base +
-            (long)(sampleY[index] - (**pixMap).bounds.top) * rowBytes +
-            (long)(sampleX[index] - (**pixMap).bounds.left) * 4;
-        DebugLog("Renderer: %s pixel %d,%d ARGB=%02x%02x%02x%02x", name,
-                 sampleX[index], sampleY[index], pixel[0], pixel[1], pixel[2], pixel[3]);
+        if ((**pixMap).pixelSize == 16) {
+            unsigned short *pixel = (unsigned short *)(base +
+                (long)(sampleY[index] - (**pixMap).bounds.top) * rowBytes +
+                (long)(sampleX[index] - (**pixMap).bounds.left) * 2);
+            DebugLog("Renderer: %s pixel %d,%d RGB555=%04x", name,
+                     sampleX[index], sampleY[index], *pixel);
+        } else {
+            DebugLog("Renderer: %s pixel diagnostics unsupported depth=%d", name,
+                     (**pixMap).pixelSize);
+        }
     }
     UnlockPixels(pixMap);
 }
@@ -374,15 +428,15 @@ static void WriteMenuPixel(PixMapHandle pixMap, short x, short y,
 {
     unsigned char *base = (unsigned char *)GetPixBaseAddr(pixMap);
     long rowBytes = (**pixMap).rowBytes & 0x3fff;
-    unsigned char *pixel = base +
-                            (long)(y - (**pixMap).bounds.top) * rowBytes +
-                            (long)(x - (**pixMap).bounds.left) * 4;
+    unsigned short *pixel = (unsigned short *)(base +
+        (long)(y - (**pixMap).bounds.top) * rowBytes +
+        (long)(x - (**pixMap).bounds.left) * 2);
 
-    /* Classic 32-bit Mac PixMaps use native ARGB byte order. */
-    pixel[0] = 0;
-    pixel[1] = (unsigned char)(color->red >> 8);
-    pixel[2] = (unsigned char)(color->green >> 8);
-    pixel[3] = (unsigned char)(color->blue >> 8);
+    /* NewGWorld(16) uses Classic QuickDraw's xRGB555 layout, rather than
+       the RGB565 layout used by some DirectDraw adapters. */
+    *pixel = (unsigned short)(((color->red >> 11) << 10) |
+                              ((color->green >> 11) << 5) |
+                              (color->blue >> 11));
 }
 
 static Boolean EnsureMenuWorld(void)
@@ -393,10 +447,10 @@ static Boolean EnsureMenuWorld(void)
     if (gMenuWorld != NULL) {
         return 1;
     }
-    DebugLog("Renderer: creating 32-bit 800x600 transfer world");
-    worldError = NewGWorld(&gMenuWorld, 32, &worldBounds, NULL, NULL, 0);
+    DebugLog("Renderer: creating RGB555 800x600 transfer world");
+    worldError = NewGWorld(&gMenuWorld, 16, &worldBounds, NULL, NULL, 0);
     if (worldError != noErr || gMenuWorld == NULL) {
-        DebugLog("Renderer: 32-bit NewGWorld failed error=%d", worldError);
+        DebugLog("Renderer: RGB555 NewGWorld failed error=%d", worldError);
         return 0;
     }
     return 1;
@@ -408,12 +462,12 @@ static Boolean EnsureCreditsWorld(void)
     Rect worldBounds = { -40, -40, 560, 760 };
 
     if (gCreditsWorld != NULL) return 1;
-    worldError = NewGWorld(&gCreditsWorld, 32, &worldBounds, NULL, NULL, 0);
+    worldError = NewGWorld(&gCreditsWorld, 16, &worldBounds, NULL, NULL, 0);
     if (worldError != noErr || gCreditsWorld == NULL) {
-        DebugLog("Credits: 32-bit frame GWorld creation failed error=%d", worldError);
+        DebugLog("Credits: RGB555 frame GWorld creation failed error=%d", worldError);
         return 0;
     }
-    DebugLog("Credits: created 32-bit compositing GWorld");
+    DebugLog("Credits: created RGB555 compositing GWorld");
     return 1;
 }
 
@@ -1171,7 +1225,7 @@ void JA2BlitWorldToWindow(GWorldPtr world, const char *name)
     GetGWorld(&savedPort, &savedDevice);
     /* SetPort alone does not select a color graphics device. Always target
        the device that owns this application window before CopyBits. */
-    SetGWorld((CGrafPtr)gWindow, GetMainDevice());
+    SelectWindowGWorld();
     logBlit = !gMenuBlitLogged;
     savedClip = NewRgn();
     presentationClip = NewRgn();
@@ -1230,7 +1284,7 @@ void JA2BlitWorldToWindow(GWorldPtr world, const char *name)
     UnlockPixels(sourcePixMap);
     if (logBlit) {
         gMenuBlitLogged = 1;
-        DebugLog("Renderer: copied %s 640x480 32-bit GWorld to color window", name);
+        DebugLog("Renderer: copied %s 640x480 RGB555 GWorld to color window", name);
         LogPixMap("menu source", sourcePixMap);
         LogPixMap("window destination", destinationPixMap);
         LogPixMapSamples("menu source", sourcePixMap);
@@ -1415,8 +1469,8 @@ Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
         free(pixels);
         return 0;
     }
-    if ((**menuPixMap).pixelSize != 32) {
-        DebugLog("Menu loader: invalid 32-bit PixMap depth=%d",
+    if ((**menuPixMap).pixelSize != 16) {
+        DebugLog("Menu loader: expected 16-bit destination PixMap, got depth=%d",
                  (**menuPixMap).pixelSize);
         UnlockPixels(menuPixMap);
         free(pixels);
@@ -1620,14 +1674,17 @@ static void DrawCreditsScreen(void)
     short y;
     Boolean anyEyesClosed = 0;
 
-    SetGWorld((CGrafPtr)gWindow, GetMainDevice());
-    gMenuRenderDirectToWindow = 1;
+    if (!EnsureCreditsWorld()) return;
+    /* Compose the complete credits frame off-screen. Direct writes to a
+       mirrored window can be erased by QuickDraw update processing. */
+    gMenuRenderDirectToWindow = 0;
     if (!RenderIndexedBackground("Interface.slf", "CREDITS.STI")) {
-        DebugLog("Credits: direct background render failed");
+        DebugLog("Credits: off-screen background render failed");
         gMenuRenderDirectToWindow = 0;
         return;
     }
-    DebugLog("Credits: rendered background directly to color window");
+    DebugLog("Credits: rendered background to RGB555 frame GWorld");
+    SetGWorld(gCreditsWorld, NULL);
     for (index = 0; index < 15; ++index) {
         if (gCreditFaces[index].eyesClosedUntil != 0) {
             anyEyesClosed = 1;
@@ -1668,7 +1725,7 @@ static void DrawCreditsScreen(void)
         DebugLog("Credits: rendered scroll=%d hover=%d", gCreditsScrollOffset,
                  gCreditsHoverFace);
     }
-    SetGWorld((CGrafPtr)gWindow, GetMainDevice());
+    JA2BlitWorldToWindow(gCreditsWorld, "credits frame");
 }
 
 static void EnterCreditsScreen(void)
@@ -1865,8 +1922,14 @@ static void EnterMainMenu(void);
 
 static void RenderMainMenuDirectly(void)
 {
+    unsigned long startTicks = TickCount();
+
+    DebugLog("Main menu: composing RGB555 background and buttons");
     HideCursor();
-    gMenuRenderDirectToWindow = 1;
+    /* Always compose indexed artwork in the native 16-bit cache, as the
+       original renderer does. This keeps mirrored LCD/VGA presentation out of
+       the asset decoder's raw pixel path. */
+    gMenuRenderDirectToWindow = 0;
     gMenuBackgroundLoaded = RenderMainMenuBackground();
     if (gMenuBackgroundLoaded) {
         RenderMenuLogo();
@@ -1874,12 +1937,20 @@ static void RenderMainMenuDirectly(void)
         if (!gMenuButtonsLoaded) {
             DrawMainMenu();
         }
+        JA2BlitMenuBackground();
+        DebugLog("Main menu: post-blit RGB555 samples");
+        LogPixMapSamples("main menu cache", GetGWorldPixMap(gMenuWorld));
+        LogPixMapSamples("main menu window", ((CWindowPtr)gWindow)->portPixMap);
     } else {
         gMenuButtonsLoaded = 0;
+        gMenuRenderDirectToWindow = 1;
         DrawJA2Shell();
+        gMenuRenderDirectToWindow = 0;
     }
-    gMenuRenderDirectToWindow = 0;
     ShowCursor();
+    DebugLog("Main menu: composition complete loaded=%d buttons=%d ticks=%lu",
+             gMenuBackgroundLoaded, gMenuButtonsLoaded,
+             (unsigned long)(TickCount() - startTicks));
 }
 
 static void EnterMainMenu(void)
@@ -1906,9 +1977,20 @@ void RestoreMainMenu(void)
     gActionScreenNeedsRender = 0;
     gMenuButton = -1;
     gMenuHoverButton = -1;
+    /* The existing cache contains the outgoing screen. Prevent hover/button
+       redraws from painting over a cleared window before the main menu cache
+       has been rebuilt and presented. */
+    gMenuBackgroundLoaded = 0;
+    gMenuButtonsLoaded = 0;
+    /* Rebuild before invalidating the window. Otherwise the update event
+       briefly draws DrawJA2Shell(), which is only an asset-diagnostic fallback
+       and must not appear during a normal screen transition. */
+    /* A pending update event may still finalize after this mouse event and
+       clear the window. Ask the post-EndUpdate path to present the completed
+       cache once more so the rebuilt menu cannot end on a white window. */
     gMainMenuNeedsRender = 1;
-    SetGWorld((CGrafPtr)gWindow, GetMainDevice());
-    InvalRect(&gWindow->portRect);
+    RenderMainMenuDirectly();
+    SetPort(gWindow);
 }
 
 static void PollStartup(void)
@@ -2010,6 +2092,26 @@ static void HandleMainMenuClick(Point point)
     }
 }
 
+static void GetWorkingDirectoryText(char *buffer, size_t bufferSize)
+{
+    Str255 volumeName;
+    short volumeReference;
+    long directoryID;
+    unsigned short length;
+
+    if (HGetVol(volumeName, &volumeReference, &directoryID) != noErr) {
+        strcpy(buffer, "(unavailable)");
+        return;
+    }
+    length = volumeName[0];
+    if ((size_t)length + 32 >= bufferSize) {
+        length = (unsigned short)(bufferSize - 33);
+    }
+    memcpy(buffer, &volumeName[1], length);
+    buffer[length] = 0;
+    sprintf(&buffer[length], ": (directory ID %ld)", directoryID);
+}
+
 static void DrawJA2Shell(void)
 {
     Rect bounds;
@@ -2021,6 +2123,8 @@ static void DrawJA2Shell(void)
     char dataStatus[48];
     char entryStatus[48];
     char assetStatus[64];
+    char workingDirectory[256];
+    char dataPath[320];
 
     SetPort(gWindow);
     bounds = gWindow->portRect;
@@ -2061,6 +2165,16 @@ static void DrawJA2Shell(void)
     }
     DrawCString(60, 254, assetStatus);
 
+    GetWorkingDirectoryText(workingDirectory, sizeof(workingDirectory));
+    strcpy(dataPath, DATA_PATH_FORMAT);
+    TextSize(9);
+    DrawCString(60, 278, WORKING_DIRECTORY_TEXT);
+    DrawCString(60, 291, workingDirectory);
+    DrawCString(60, 306, dataPath);
+    DrawCString(60, 321, DATA_LOCATION_TEXT);
+    DrawCString(60, 336, INI_LOCATION_TEXT);
+    TextSize(12);
+
     RGBForeColor(&black);
 }
 
@@ -2073,7 +2187,12 @@ static void HandleJA2Event(const EventRecord *event)
 
     if (event->what == keyDown || event->what == autoKey) {
         key = (char)(event->message & charCodeMask);
-        DebugLog("Input: key=%d screen=%d", (unsigned char)key, gMenuScreen);
+        DebugLog("Input: %s key=%d char='%c' modifiers=%u screen=%d startup=%d intro=%d",
+                 event->what == autoKey ? "autoKey" : "keyDown",
+                 (unsigned char)key,
+                 (key >= 32 && key < 127) ? key : '?',
+                 event->modifiers, gMenuScreen, gStartupActive,
+                 gMenuScreen == MENU_SCREEN_INTRO);
         if (gMenuScreen == MENU_SCREEN_INTRO &&
             (key == 27 || key == ' ')) {
             JA2PPCIntroSkip();
@@ -2090,9 +2209,14 @@ static void HandleJA2Event(const EventRecord *event)
         }
     } else if (event->what == mouseDown) {
         part = FindWindow(event->where, &clicked);
+        DebugLog("Input: mouseDown global=%d,%d part=%d window=%p screen=%d startup=%d",
+                 event->where.h, event->where.v, part, clicked, gMenuScreen,
+                 gStartupActive);
         if (part == inDrag) {
+            DebugLog("Input: window drag requested");
             DragWindow(clicked, event->where, &qd.screenBits.bounds);
         } else if (part == inGoAway && TrackGoAway(clicked, event->where)) {
+            DebugLog("Input: close box accepted window=%p", clicked);
             if (clicked == gDiagnosticsWindow) {
                 HideWindow(gDiagnosticsWindow);
             } else {
@@ -2102,12 +2226,18 @@ static void HandleJA2Event(const EventRecord *event)
             Point point = event->where;
             SetPort(gWindow);
             GlobalToLocal(&point);
+            DebugLog("Input: content click local=%d,%d screen=%d startup=%d",
+                     point.h, point.v, gMenuScreen, gStartupActive);
             if (!gStartupActive && gMenuScreen == MENU_SCREEN_INTRO) {
+                DebugLog("Input: intro click requests skip");
                 JA2PPCIntroSkip();
             } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_MAIN) {
                 HandleMainMenuClick(point);
             } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_DIFFICULTY) {
                 JA2HandleDifficultyClick(point);
+            } else {
+                DebugLog("Input: content click ignored screen=%d startup=%d",
+                         gMenuScreen, gStartupActive);
             }
         }
     } else if (event->what == updateEvt) {
@@ -2121,7 +2251,10 @@ static void HandleJA2Event(const EventRecord *event)
         }
         if (gStartupActive ||
             (gMenuBackgroundLoaded && gMenuScreen == MENU_SCREEN_MAIN)) {
-            redrawMenuAfterUpdate = gStartupActive;
+            /* The window manager may deliver more than one update after a
+               screen transition. Restore the cached menu after every such
+               update, not only during the startup splash. */
+            redrawMenuAfterUpdate = 1;
         } else if (gMenuScreen == MENU_SCREEN_CREDITS) {
             DrawCreditsScreen();
         } else if (gMenuScreen == MENU_SCREEN_INTRO) {
@@ -2135,6 +2268,12 @@ static void HandleJA2Event(const EventRecord *event)
             DrawJA2Shell();
         }
         EndUpdate(updatedWindow);
+        if (updatedWindow == gWindow && gMenuScreen == MENU_SCREEN_CREDITS &&
+            gCreditsWorld != NULL) {
+            /* EndUpdate can clear the window's update region after a full
+               CopyBits. Restore the complete cached Credits frame afterward. */
+            JA2BlitWorldToWindow(gCreditsWorld, "credits frame after update");
+        }
         if (updatedWindow == gWindow && redrawMenuAfterUpdate) {
             /* Copy after EndUpdate so QuickDraw cannot clear the new frame as
                part of finalizing the invalidated content region. */
@@ -2169,8 +2308,9 @@ int main(void)
     InitMenus();
     InitCursor();
 
-    depthError = SetDepth(GetMainDevice(), 32, 0, 0);
-    DebugLog("Display depth request: 32-bit result=%d", depthError);
+    depthError = SetDepth(GetMainDevice(), 16, 0, 0);
+    DebugLog("Display depth request: main device 16-bit result=%d", depthError);
+    SetAllDisplayDepths();
 
     gWindow = NewCWindow(NULL, &bounds, (ConstStr255Param) WINDOW_TITLE, 1,
                          documentProc, (WindowPtr)-1, 1, 0);

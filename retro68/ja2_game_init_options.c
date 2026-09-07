@@ -44,14 +44,14 @@ static void DarkenDifficultyPanel(const Rect *panel)
     base = (unsigned char *)GetPixBaseAddr(pixMap);
     rowBytes = (**pixMap).rowBytes & 0x3fff;
     for (y = panel->top; y < panel->bottom; ++y) {
-        unsigned char *pixel = base +
+        unsigned short *pixel = (unsigned short *)(base +
             (long)(y - (**pixMap).bounds.top) * rowBytes +
-            (long)(panel->left - (**pixMap).bounds.left) * 4;
+            (long)(panel->left - (**pixMap).bounds.left) * 2);
         for (x = panel->left; x < panel->right; ++x) {
-            pixel[1] = (unsigned char)(pixel[1] >> 1);
-            pixel[2] = (unsigned char)(pixel[2] >> 1);
-            pixel[3] = (unsigned char)(pixel[3] >> 1);
-            pixel += 4;
+            /* Halve each RGB555 component without allowing bits to bleed
+               between the red, green, and blue fields. */
+            *pixel = (unsigned short)((*pixel & 0x7bde) >> 1);
+            ++pixel;
         }
     }
     UnlockPixels(pixMap);
@@ -138,8 +138,8 @@ void JA2DrawDifficultyScreen(void)
         }
     }
 
-    /* The cache is presentation-only. Keep all text and controls in the
-       color window so QuickDraw cannot modify it between option selections. */
+    /* The 16-bit cache is presentation-only. Keep all text and controls in
+       the color window so QuickDraw cannot modify it between selections. */
     SetGWorld((CGrafPtr)gWindow, GetMainDevice());
     JA2LogDifficultyRenderState("before controls");
     TextFont(systemFont);
@@ -212,6 +212,7 @@ static Boolean DifficultyOptionAt(Point point)
 
 void JA2HandleDifficultyClick(Point point)
 {
+    DebugLog("Difficulty: click local=%d,%d", point.h, point.v);
     if (DifficultyOptionAt(point)) {
         DebugLog("Difficulty: selection changed difficulty=%d extraWeapons=%d ironMan=%d sciFi=%d",
                  gDifficultySelection, gDifficultyExtraWeapons,

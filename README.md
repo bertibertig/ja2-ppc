@@ -134,6 +134,15 @@ transfer, but the wrapper does not modify the supplied OS disk image. Use
 `build`, `deploy`, `test`, or `run` for individual steps. The emulator stops
 after 30 seconds by default; override this with `DINGUS_TIMEOUT`.
 
+## Real PowerBook G3 Workflow
+
+The repository includes `.mcp.json` and a machine configuration template for
+the `classic-mac-hardware-mcp` deployment/logging workflow. See
+`CLASSIC_MAC_HARDWARE_MCP.md` for modern-machine setup, RumpusFTP and
+LaunchAPPLServer installation on the G3, network safety, and the exact run
+sequence. This provides remote deployment and log retrieval, not source-level
+breakpoints or register debugging.
+
 ## Current Port Status
 
 The current application is not yet the complete game. Remaining work includes:

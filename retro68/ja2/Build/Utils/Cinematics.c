@@ -2,7 +2,8 @@
 
 #include "../../../ja2_mac_internal.h"
 
-#include <Multiverse.h>
+#include <QuickTime.h>
+#include <Timer.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -13,10 +14,19 @@ enum {
 #define JA2_GESTALT_QUICKTIME_VERSION \
     ((long)('q' << 24) | (long)('t' << 16) | (long)('i' << 8) | (long)'m')
 
+/* A zero budget only performs a small amount of idle work.  That is not
+   enough for MPEG decoding on slower PPC machines, and makes frame delivery
+   depend on unrelated event-loop work.  Twenty milliseconds is below the
+   25-fps frame interval while still returning regularly for input/events. */
+#define JA2_MOVIE_TASK_BUDGET_MS 20
+
 struct JA2PPCVideo {
     Movie movie;
     short fileRefNum;
     Boolean done;
+    unsigned long pollCount;
+    unsigned long lastPollTicks;
+    unsigned long delayedPolls;
 };
 
 static WindowPtr gVideoWindow;
@@ -133,18 +143,31 @@ JA2PPCVideo *JA2PPCVideoOpen(const char *archiveName, const char *entryName)
     StartMovie(video->movie);
     DebugLog("Video: QuickTime MPEG started entry=%s dataRefChanged=%d", entryName,
              dataRefChanged);
-    DebugLog("Video: Movie Toolbox is polled once per event-loop tick");
+    DebugLog("Video: Movie Toolbox task budget=%d ms", JA2_MOVIE_TASK_BUDGET_MS);
     LogVideoMemory("after movie start");
     return video;
 }
 
 Boolean JA2PPCVideoPoll(JA2PPCVideo *video)
 {
+    unsigned long now;
+
     if (video == NULL || video->movie == NULL || video->done) return 0;
-    /* Keep Movie Toolbox servicing independent of monitor refresh rate. A
-       zero budget performs available work without blocking the event loop. */
-    MoviesTask(video->movie, 0);
+    now = (unsigned long)TickCount();
+    if (video->lastPollTicks != 0 &&
+        (unsigned long)(now - video->lastPollTicks) > 2) {
+        ++video->delayedPolls;
+    }
+    video->lastPollTicks = now;
+    ++video->pollCount;
+    /* Give QuickTime enough time to decode a frame.  MoviesTask remains
+       bounded, so a slow decode cannot permanently starve system events. */
+    MoviesTask(video->movie, JA2_MOVIE_TASK_BUDGET_MS);
     video->done = IsMovieDone(video->movie);
+    if ((video->pollCount % 120) == 0) {
+        DebugLog("Video: polls=%lu delayed=%lu", video->pollCount,
+                 video->delayedPolls);
+    }
     return video->done ? 0 : 1;
 }
 

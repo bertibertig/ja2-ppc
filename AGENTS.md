@@ -16,9 +16,17 @@ repository. Do not use the upstream `dariusk/ja2` repository for port work.
 
 ## Porting Rule
 
-The PPC port must preserve the original x86 source organization 1:1.
+The PPC port must preserve the original x86 source organization 1:1, but the
+PPC implementation tree is rooted at `retro68/`. Do not mirror the original
+repository's `ja2/Build/` path beneath `retro68/`.
 
-- Keep the original directory hierarchy, file names, and subsystem boundaries.
+- Keep the original file names and subsystem boundaries. Map the original
+  source path relative to `ja2/Build/` into the corresponding path under
+  `retro68/`. For example, `ja2/Build/Utils/Cinematics.c` belongs at
+  `retro68/Utils/Cinematics.c`, and `ja2/Build/Intro.c` belongs at
+  `retro68/Intro.c`.
+- Do not place a reimplementation at a path such as
+  `retro68/ja2/Build/Utils/Cinematics.c` merely to match the original tree.
 - Port code into the PPC counterpart of the original source file instead of
   accumulating game logic in a central platform or shell file.
 - Preserve the original ownership of state, call flow, and lifecycle functions.
@@ -119,6 +127,69 @@ ownership or animation.
 - Prefer the German debug configuration for current PPC validation:
   `retro68/build-german-debug/` with `JA2_LANGUAGE=german` and
   `JA2_DEBUG_BUILD=ON`.
+- After running a debug build on the original Mac through LaunchAPPL, use the
+  `classic-mac-hardware` MCP `download_file` tool to retrieve
+  `JA2PPC-Debug.log` from the Mac before diagnosing the result. Inspect the
+  downloaded log for startup, asset lookup, rendering, input, and shutdown
+  diagnostics. The log is written beside the application by debug builds.
+- Before every debug deployment and LaunchAPPL run, delete the existing remote
+  `JA2PPC-Debug.log` so each run starts with a bounded, unambiguous log. Do not
+  diagnose from an appended log containing earlier runs.
+
+### Cam Link Visual Inspection
+
+When a PPC Macintosh is connected to the host through an Elgato Cam Link 4K,
+use the capture device to inspect the actual display output rather than relying
+only on LaunchAPPL status or debug logs. This applies to the PowerBook G3 and
+any other connected PPC Macintosh.
+
+1. Identify the capture node and supported formats:
+
+   ```sh
+   v4l2-ctl --list-devices
+   v4l2-ctl --all -d /dev/video0
+   ```
+
+   The Cam Link commonly exposes `/dev/video0` for video and `/dev/video1` for
+   metadata, but always use the node reported by `v4l2-ctl`.
+
+2. Confirm that the video node is not already owned by OBS or another capture
+   application:
+
+   ```sh
+   fuser -v /dev/video0
+   ```
+
+   Do not terminate an unrelated capture process. Have it release the device
+   before starting a direct `ffmpeg` capture.
+
+3. Start `ffmpeg` and LaunchAPPL at the same time so the recording includes the
+   startup, splash, menus, and any user-selected screen transitions:
+
+   ```sh
+   ffmpeg -y -f v4l2 -framerate 30 -video_size 1024x768 \
+     -i /dev/video0 -t 30 -an -c:v libx264 -preset ultrafast -crf 18 \
+     /tmp/opencode/powerbook-capture.mp4
+   ```
+
+   Run the capture command in parallel with
+   `classic-mac-hardware_execute_binary`, using the PPC binary and machine under
+   test. Adjust `-t` when a longer interaction sequence is required.
+
+4. Extract inspection frames from the recording without changing the source
+   application output:
+
+   ```sh
+   mkdir -p /tmp/opencode/capture-frames
+   ffmpeg -y -i /tmp/opencode/powerbook-capture.mp4 -vf fps=1/5 \
+     /tmp/opencode/capture-frames/frame-%02d.png
+   ```
+
+   Read the PNG frames to inspect splash-to-menu transitions, mirrored-display
+   output, video frames, Credits, New Game, and other affected screens. Compare
+   visible output with the downloaded `JA2PPC-Debug.log` timestamps and state
+   transitions.
+
 - Add diagnostic logging for feature entry, state transitions, asset lookup,
   allocation, decoding, Toolbox errors, and failure or fallback paths.
 - Keep generated build artifacts out of source changes unless explicitly

@@ -65,7 +65,7 @@ The host conversion step extracts the four entries, invokes FFmpeg, and caches
 320x240 MPEG program streams encoded as MPEG-1 video at 1,150 kbit/s with MP2
 audio at 128 kbit/s and 44.1 kHz. The PPC Movie Toolbox backend will validate
 QuickTime availability, create the movie from its data fork, attach it to an
-off-screen 32-bit GWorld with `SetMovieGWorld`, advance it cooperatively with
+off-screen 16-bit QuickDraw GWorld with `SetMovieGWorld`, advance it cooperatively with
 `MoviesTask`, and present each complete frame without clipped window
 `CopyBits` updates. The native SMK2 decoder remains the fallback if the
 selected legacy QuickTime component is not available on the target System 9
@@ -76,12 +76,14 @@ installation.
 1. Probe and validate `Intro.slf` SMK2 entries without claiming playback.
 2. Test the generated legacy-compatible MPEG files with the target System 9
    QuickTime installation and validate video-only playback.
-3. Add a QuickTime Movie Toolbox backend in the PPC counterpart of
-   `Utils/Cinematics.c`.
+3. Add a QuickTime Movie Toolbox backend in the PPC counterpart at
+   `retro68/Utils/Cinematics.c`. The PPC tree is rooted at `retro68/`; do not
+   reproduce the original `ja2/Build/` prefix beneath it.
 4. If the target QuickTime component cannot play the generated files, implement
-   the SMK2 Huffman trees and frame
-   chunk decoder in the PPC counterpart of `Utils/Cinematics.c`.
-5. Convert decoded indexed/YUV-style Smacker frame data into the 32-bit GWorld
+   the SMK2 Huffman trees and frame chunk decoder in
+   `retro68/Utils/Cinematics.c`.
+5. Convert decoded indexed/YUV-style Smacker frame data into the native 16-bit
+   QuickDraw GWorld
    format used by the PPC renderer, or copy frames produced by QuickTime into
    that GWorld.
 6. Add cooperative timing using `TickCount()` and the frame rate from the SMK2
@@ -107,7 +109,8 @@ installation.
 
 ## Current Boundary Status
 
-The reusable PPC cinematics boundary begins in the source counterpart of the
-original `Utils/Cinematics.c`. Until the decoder stages are complete, intro
+The reusable PPC cinematics boundary begins at `retro68/Utils/Cinematics.c`,
+the PPC source counterpart of the original `ja2/Build/Utils/Cinematics.c`.
+Until the decoder stages are complete, intro
 playback must report an explicit unsupported-decoder diagnostic and must not
 silently substitute a static frame or claim that the intro videos played.
