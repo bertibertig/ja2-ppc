@@ -112,6 +112,37 @@ PPC data fork and may fail when transferred without its classic Mac resource
 metadata. The `JA2PPC Bundle` contains the application, `Ja2.ini`, and the
 complete selected `Data/` tree for deployment.
 
+## DingusPPC Debug Workflow
+
+The repository's `opencode.json` identifies the local DingusPPC checkout. Use
+the wrapper below to configure and build the German debug target, deploy the
+bundle to `.dingusppc/deploy/`, validate the emulator installation, and run a
+bounded emulator smoke test when a bootable Mac OS disk is configured:
+
+```sh
+JA2_DATA_DIR="/path/to/Jagged Alliance 2" \
+DINGUS_HDD_IMAGE="/path/to/System-9.dsk" \
+DINGUS_BOOTROM="$DINGUS_ROOT/build/bin/1997-11 - 78F57389 - Power Mac G3 (v3).ROM" \
+./tools/dingusppc-ja2.sh all
+```
+
+`DINGUS_BOOTROM` is optional when exactly one ROM is present in the configured
+DingusPPC `build/bin` directory. `DINGUS_HDD_IMAGE` must be a bootable Mac OS
+image because DingusPPC cannot boot a host directory or a raw `.APPL` file.
+The generated `JA2PPC.dsk` and complete `JA2PPC Bundle` are staged for
+transfer, but the wrapper does not modify the supplied OS disk image. Use
+`build`, `deploy`, `test`, or `run` for individual steps. The emulator stops
+after 30 seconds by default; override this with `DINGUS_TIMEOUT`.
+
+## Real PowerBook G3 Workflow
+
+The repository includes `.mcp.json` and a machine configuration template for
+the `classic-mac-hardware-mcp` deployment/logging workflow. See
+`CLASSIC_MAC_HARDWARE_MCP.md` for modern-machine setup, RumpusFTP and
+LaunchAPPLServer installation on the G3, network safety, and the exact run
+sequence. This provides remote deployment and log retrieval, not source-level
+breakpoints or register debugging.
+
 ## Current Port Status
 
 The current application is not yet the complete game. Remaining work includes:

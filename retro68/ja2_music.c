@@ -15,7 +15,7 @@
 #define JA2_SOUND_AMPLITUDE(volume) (((volume) * 255) / 127)
 
 static SndChannelPtr gMusicChannel;
-static SndCallbackUPP gMusicCallback;
+static SndCallBackUPP gMusicCallback;
 static ExtSoundHeader gMusicHeader;
 static unsigned char *gMusicData;
 static Boolean gMusicPlaying;
@@ -152,7 +152,7 @@ static Boolean LoadMenuMusic(void)
     gMusicHeader.sampleRate = (Fixed)(sampleRate << 16);
     gMusicHeader.encode = extSH;
     gMusicHeader.baseFrequency = JA2_MUSIC_BASE_FREQUENCY;
-    gMusicHeader.numFrames = (LONGINT)(dataLength / (channels * (bitsPerSample / 8)));
+    gMusicHeader.numFrames = (long)(dataLength / (channels * (bitsPerSample / 8)));
     gMusicHeader.sampleSize = bitsPerSample;
     MusicLog("Music: converted PCM to native PowerPC byte order (%ld frames)",
              gMusicHeader.numFrames);
@@ -179,7 +179,7 @@ static void PlayMenuMusic(void)
     }
     command.cmd = bufferCmd;
     command.param1 = 0;
-    command.param2 = (LONGINT)&gMusicHeader;
+    command.param2 = (long)&gMusicHeader;
     error = SndDoCommand(gMusicChannel, &command, 1);
     if (error != noErr) {
         MusicLog("Music: Sound Manager rejected PCM buffer command (error=%d)", error);
@@ -216,7 +216,7 @@ void JA2MenuMusicStart(void)
     if (!LoadMenuMusic()) {
         return;
     }
-    gMusicCallback = NewSndCallbackUPP(MusicCallback);
+    gMusicCallback = NewSndCallBackUPP(MusicCallback);
     if (gMusicCallback == NULL) {
         MusicLog("Music: cannot create Sound Manager callback descriptor");
     }
@@ -229,7 +229,7 @@ void JA2MenuMusicStart(void)
                           gMusicCallback);
     if (error != noErr) {
         MusicLog("Music: cannot create sampled Sound Manager channel (error=%d)", error);
-        DisposeSndCallbackUPP(gMusicCallback);
+        DisposeSndCallBackUPP(gMusicCallback);
         gMusicCallback = NULL;
         free(gMusicData);
         gMusicData = NULL;
@@ -290,7 +290,7 @@ void JA2MenuMusicShutdown(void)
         gMusicChannel = NULL;
     }
     if (gMusicCallback != NULL) {
-        DisposeSndCallbackUPP(gMusicCallback);
+        DisposeSndCallBackUPP(gMusicCallback);
         gMusicCallback = NULL;
     }
     free(gMusicData);
@@ -300,4 +300,9 @@ void JA2MenuMusicShutdown(void)
     gMusicAvailable = 0;
     gMusicFadingIn = 0;
     gMusicStatusLogged = 0;
+}
+
+void JA2MenuMusicStop(void)
+{
+    JA2MenuMusicShutdown();
 }

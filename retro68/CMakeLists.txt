@@ -4,6 +4,7 @@ project(JA2PPCMac C)
 set(JA2_DATA_DIR "" CACHE PATH "JA2 installation directory containing Data/")
 set(JA2_LANGUAGE "german" CACHE STRING "JA2 data language (english or german)")
 option(JA2_DEBUG_BUILD "Write a detailed runtime debug log" ON)
+option(JA2_CONVERT_INTRO_VIDEOS "Convert Smacker intros to QuickTime MOV during the host build" ON)
 set_property(CACHE JA2_LANGUAGE PROPERTY STRINGS english german)
 
 string(TOLOWER "${JA2_LANGUAGE}" JA2_LANGUAGE_LOWER)
@@ -19,6 +20,15 @@ endif()
 
 add_application(JA2PPC
     ja2_mac.c
+    ja2_mac_internal.h
+    ja2_game_init_options.c
+    ja2_game_init_options.h
+    ja2_new_game_init.c
+    ja2_new_game_init.h
+    ja2/Build/Utils/Cinematics.c
+    ja2/Build/Utils/Cinematics.h
+    ja2/Build/Intro.c
+    ja2/Build/Intro.h
     ja2_music.c
     ja2_music.h
     ja2_slf.c
@@ -31,6 +41,7 @@ set_target_properties(JA2PPC PROPERTIES
     COMPILE_OPTIONS "-O2;-ffunction-sections"
     LINK_FLAGS "-Wl,-gc-sections"
 )
+target_link_libraries(JA2PPC QuickTimeLib)
 if(JA2_LANGUAGE_LOWER STREQUAL "german")
     target_compile_definitions(JA2PPC PRIVATE JA2_LANGUAGE_GERMAN=1)
 else()
@@ -59,6 +70,8 @@ if(JA2_DATA_DIR)
 
     set(JA2_BUNDLE_DIR "${CMAKE_CURRENT_BINARY_DIR}/JA2PPC Bundle")
     set(JA2_BUNDLE_DATA_DIR "${JA2_BUNDLE_DIR}/Data")
+    set(JA2_INTRO_VIDEO_CACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/intro-video-cache")
+    set(JA2_INTRO_VIDEO_OUTPUT_DIR "${JA2_INTRO_VIDEO_CACHE_DIR}/mpg")
     set(JA2_BUNDLE_STAMP "${JA2_BUNDLE_DIR}/.bundle-complete")
     file(GLOB JA2_ALL_ARCHIVES
         "${JA2_DATA_DIR}/Data/*.slf"
@@ -89,6 +102,41 @@ if(JA2_DATA_DIR)
         message(FATAL_ERROR "Missing Ja2.ini in JA2_DATA_DIR: ${JA2_DATA_DIR}")
     endif()
 
+    if(JA2_CONVERT_INTRO_VIDEOS)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        find_program(JA2_FFMPEG_EXECUTABLE ffmpeg REQUIRED)
+        set(JA2_INTRO_VIDEO_STAMP "${CMAKE_CURRENT_BINARY_DIR}/intro-videos.stamp")
+        set(JA2_INTRO_VIDEO_OUTPUTS
+            "${JA2_INTRO_VIDEO_OUTPUT_DIR}/REBEL_CR.mpg"
+            "${JA2_INTRO_VIDEO_OUTPUT_DIR}/OMERTA.mpg"
+            "${JA2_INTRO_VIDEO_OUTPUT_DIR}/PRAGUE_CR.mpg"
+            "${JA2_INTRO_VIDEO_OUTPUT_DIR}/PRAGUE.mpg"
+        )
+        add_custom_command(
+            OUTPUT ${JA2_INTRO_VIDEO_STAMP}
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/convert_intro_videos.py"
+                --archive "${JA2_DATA_DIR}/Data/Intro.slf"
+                --cache-dir "${JA2_INTRO_VIDEO_CACHE_DIR}"
+                --output-dir "${JA2_INTRO_VIDEO_OUTPUT_DIR}"
+                --ffmpeg "${JA2_FFMPEG_EXECUTABLE}"
+            COMMAND "${CMAKE_COMMAND}" -E touch "${JA2_INTRO_VIDEO_STAMP}"
+            DEPENDS
+                "${JA2_DATA_DIR}/Data/Intro.slf"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../tools/convert_intro_videos.py"
+            VERBATIM
+        )
+        add_custom_target(JA2PPC_INTRO_VIDEOS DEPENDS "${JA2_INTRO_VIDEO_STAMP}")
+    endif()
+
+    set(JA2_BUNDLE_VIDEO_DEPENDENCY "")
+    set(JA2_BUNDLE_VIDEO_COMMAND "")
+    if(JA2_CONVERT_INTRO_VIDEOS)
+        set(JA2_BUNDLE_VIDEO_DEPENDENCY JA2PPC_INTRO_VIDEOS)
+        set(JA2_BUNDLE_VIDEO_COMMAND
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${JA2_INTRO_VIDEO_OUTPUT_DIR}" "${JA2_BUNDLE_DATA_DIR}/Intro")
+    endif()
+
     add_custom_command(
         OUTPUT "${JA2_BUNDLE_STAMP}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${JA2_BUNDLE_DATA_DIR}"
@@ -98,10 +146,13 @@ if(JA2_DATA_DIR)
             "${CMAKE_CURRENT_BINARY_DIR}/JA2PPC.bin" "${JA2_BUNDLE_DIR}/JA2PPC.bin"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${JA2_DATA_DIR}/Data" "${JA2_BUNDLE_DATA_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory "${JA2_BUNDLE_DATA_DIR}/Intro"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${JA2_BUNDLE_DATA_DIR}/Intro"
+        ${JA2_BUNDLE_VIDEO_COMMAND}
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${JA2_DATA_DIR}/Ja2.ini" "${JA2_BUNDLE_DIR}/Ja2.ini"
         COMMAND "${CMAKE_COMMAND}" -E touch "${JA2_BUNDLE_STAMP}"
-        DEPENDS JA2PPC_APPL
+        DEPENDS JA2PPC_APPL ${JA2_BUNDLE_VIDEO_DEPENDENCY}
         VERBATIM
     )
     add_custom_target(JA2PPC_BUNDLE ALL DEPENDS "${JA2_BUNDLE_STAMP}")
