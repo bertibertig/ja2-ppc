@@ -95,6 +95,70 @@ This keeps `retro68/build-german-debug` etc. working as the single build
 entry point required by `AGENTS.md`, while being honest that the SDL2 layer
 is wrapped, not natively expressed in CMake.
 
+### Verified additional build/link requirements (Stage 1-2)
+
+Implemented in `retro68/cmake/SDL2Classic.cmake` and verified by building
+and running `JA2PPC_SDL2_SmokeTest` on the PowerBook G3 Lombard:
+
+- **`SDL_VIDEO_OPENGL` is not actually optional at the source level.**
+  `SDL-main/include/SDL_config_macosclassic.h` unconditionally defines it,
+  so `macvideo.c`/`macevents.c` always reference a fixed set of `GL_*` hookup
+  functions (`glLoadLibrary`, `glCreateContext`, `glMakeCurrent`, ...,
+  `Mac_GL_SetDrawableActive`, `Mac_GL_Update`), regardless of
+  `SDL_MACOSCLASSIC_AGL`. With AGL disabled (per this project's policy),
+  `macgl.c` — the only file implementing them — compiles to nothing, which
+  leaves those references unresolved at link time. The Retro68 toolchain
+  also has no AGL import library at all (verified: no `aglCreateContext`
+  symbol in any toolchain `.a`), and the fork's alternative
+  (`mactinygl.c`/`SDL_MACOSCLASSIC_TINYGL`) is a bundled software rasterizer
+  this project does not want as a dependency. `retro68/sdl2_gl_stub.c`
+  supplies no-op implementations of exactly this function set; any target
+  linking `SDL2::Classic` must compile it too. JA2 game code never calls
+  `SDL_GL_*`, so a no-op stub is safe.
+- **`SDL_THREAD_MACOSCLASSIC` is also unconditional** in the same header, so
+  `libThreadsLib.a` (Thread Manager) must be linked even though nothing in
+  this project uses SDL threads.
+- **Transcendental math calls are unconditional** via the same
+  `SDL_VIDEO_OPENGL` path (`src/stdlib/SDL_stdlib.c`). Apple's
+  `libMathLib.a` covers the double-precision entry points; the float
+  (`*f`) and `lround`/`lroundf` variants it lacks are covered by newlib's
+  `libm.a`. Both are linked.
+- **Archive link order defeats a plain `target_link_libraries()` for
+  `libSDL2main.a`.** CMake's toolchain-file ABI detection appends a
+  trailing `--start-group -lgcc -lc -lretrocrt -lInterfaceLib --end-group`
+  after a target's own libraries. `-lretrocrt`'s startup object needs
+  `.main`, which only `libSDL2main.a` defines
+  (`src/main/macosclassic/SDL_main.c`); since that startup object is inside
+  the trailing group and `libSDL2main.a` is not, a single left-to-right `ld`
+  pass never revisits `libSDL2main.a` to pull in `main`. The fix, wrapped in
+  `target_link_sdl2_classic()`, is `-Wl,--whole-archive libSDL2main.a
+  -Wl,--no-whole-archive`, which forces `main` to already be a defined
+  global symbol before the trailing group is processed.
+- **Retro68's default `add_application()` `SIZE` resource is only 1 MB**
+  (`RIncludes/Retro68APPL.r`), far below what SDL2's own allocations
+  (window backing surface, video mode tables, mouse/event state) plus one
+  additional explicit game-side `RGB555` surface need. Verified on real
+  hardware: without a larger `SIZE` resource,
+  `SDL_CreateRGBSurfaceWithFormat` failed with "Out of memory" right after
+  `SDL_CreateWindow`. Every SDL2-linked application target needs its own
+  `SIZE` resource matching `ja2_mac.r`'s 32 MB preferred/minimum partition
+  (see `retro68/sdl2_smoke_test.r` for the template to reuse).
+- **The classic Mac desktop on the Lombard is confirmed 16-bit at the OS
+  level**, not just an assumption: `SDL_GetDesktopDisplayMode` reported
+  `1024x768 SDL_PIXELFORMAT_RGB555` on real hardware, independent of
+  whatever the external VGA-out path negotiates. This directly supports the
+  fixed-16-bit-surface strategy below.
+- **The `classic-mac-hardware` `execute_binary` tool's own timeout is not a
+  reliable "did it finish" signal** for a windowed SDL2 app with no stdout
+  output: `JA2PPC_SDL2_SmokeTest` completed its entire logged shutdown
+  sequence (down to its final "exit" log line) well inside the tool's 45s
+  timeout window, which still reported "Timed out ... app may still be
+  running". Rely on the downloaded debug log's own bounded, ordered content
+  to judge completion, not the tool's timeout/exit-code report alone. A
+  smoke-test-style APPL should auto-quit after a bounded frame/time budget
+  (see `sdl2_smoke_test.c`'s `SMOKE_FRAME_BUDGET`) so its log is always
+  complete regardless of that limitation.
+
 ## Color Depth Strategy (Lombard 16-bit LCD vs 32-bit VGA-out)
 
 Keep requesting a 16-bit (`SDL_PIXELFORMAT_RGB555`) surface for all game
@@ -181,15 +245,22 @@ is a separate, explicit cleanup task and is out of scope here.
 
 ## Implementation Stages
 
-1. Vendor `sdl2macos9`, wrap `Makefile.r68ppc` in CMake (`JA2PPC_SDL2`
-   target), disable DrawSprocket/AGL/InputSprocket, build `libSDL2.a` /
-   `libSDL2main.a` with no JA2 code changes yet.
-2. Minimal smoke-test `APPL`: `SDL_Init(SDL_INIT_VIDEO)`, `SDL_CreateWindow`
-   at the current menu resolution, force an `SDL_PIXELFORMAT_RGB555`
-   surface, solid-color clear, `SDL_PollEvent` loop with close-box quit.
-   Deploy via `LaunchAPPL` to at least one 16-bit-only Mac and the Lombard
-   (LCD 16-bit / VGA-out 32-bit) to validate the fixed-depth + blit-convert
-   approach before porting any real rendering code.
+1. **Done.** Vendor `sdl2macos9`, wrap `Makefile.r68ppc` in CMake
+   (`JA2PPC_SDL2` target), disable DrawSprocket/AGL/InputSprocket, build
+   `libSDL2.a` / `libSDL2main.a` with no JA2 code changes yet.
+2. **Done.** Minimal smoke-test `APPL` (`JA2PPC_SDL2_SmokeTest`):
+   `SDL_Init(SDL_INIT_VIDEO)`, `SDL_CreateWindow` at 640x480, force an
+   `SDL_PIXELFORMAT_RGB555` surface, cycling solid-color fill,
+   `SDL_PollEvent` loop with close-box/key/auto-quit. Deployed via
+   `LaunchAPPL` to the PowerBook G3 Lombard and verified via the downloaded
+   debug log: `SDL_Init` succeeded, the desktop reported
+   `1024x768 RGB555` (confirming the 16-bit LCD), the window and fixed
+   RGB555 surface were created after fixing the required `SIZE` resource,
+   and 120 frames presented cleanly through to a logged shutdown. See
+   "Verified additional build/link requirements" above for every fix this
+   took (GL stub, ThreadsLib/MathLib/m, `--whole-archive`, `SIZE`
+   resource). Not yet tested against a 32-bit VGA-out display, since only
+   the Lombard's internal (16-bit) panel was available for this pass.
 3. Port startup splash + main menu background/buttons
    (`RenderStartupSplash`, `RenderMainMenuBackground`,
    `RenderMenuButtonFrames`) to blit their already-decoded RGB555 pixel data

@@ -133,7 +133,13 @@ rendering or event-loop code.
   `SDL_MACOSCLASSIC_INPUTSPROCKET` unless a specific feature explicitly
   needs fullscreen mode switching, OpenGL, or joystick input. JA2 is a 2D
   sprite game and should run windowed to avoid DrawSprocket's exclusive
-  fullscreen context entirely.
+  fullscreen context entirely. Disabling AGL still requires linking
+  `retro68/sdl2_gl_stub.c` and using the `target_link_sdl2_classic()`
+  CMake helper in `retro68/cmake/SDL2Classic.cmake`; see that module and
+  `retro68/JA2_PPC_SDL2_MIGRATION_PLAN.md` ("Verified additional
+  build/link requirements") for the exact reasons (unconditional
+  `SDL_VIDEO_OPENGL`/`SDL_THREAD_MACOSCLASSIC`, archive link order, and the
+  `SIZE` resource every SDL2-linked application target needs).
 - The fork's `macos8addons/` compatibility shims and its
   `BUILDING_FOR_PRE9` code path exist for the 8.6-9.2.2 target range in
   "Toolchain And Target Platform" above; keep them enabled and verify them

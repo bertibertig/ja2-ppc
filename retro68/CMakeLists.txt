@@ -56,6 +56,19 @@ if(JA2_DEBUG_BUILD)
     target_compile_definitions(JA2PPC PRIVATE JA2_DEBUG_BUILD=1)
 endif()
 
+# Stage 2 of the SDL2 rendering backend migration: a standalone smoke-test
+# APPL, independent of JA2PPC, that only proves SDL2 initializes, opens a
+# window, and presents a fixed RGB555 surface on real hardware. See
+# retro68/JA2_PPC_SDL2_MIGRATION_PLAN.md ("Implementation Stages", stage 2).
+# JA2PPC itself is intentionally untouched by this stage.
+add_application(JA2PPC_SDL2_SmokeTest
+    sdl2_smoke_test.c
+    sdl2_gl_stub.c
+    sdl2_smoke_test.r
+    CREATOR JA2T
+)
+target_link_sdl2_classic(JA2PPC_SDL2_SmokeTest)
+
 if(JA2_DATA_DIR)
     get_filename_component(JA2_DATA_DIR "${JA2_DATA_DIR}" ABSOLUTE)
     if(NOT IS_DIRECTORY "${JA2_DATA_DIR}/Data")
