@@ -18,6 +18,11 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "RetroPPC")
         "Use a Retro68 toolchain: -DCMAKE_TOOLCHAIN_FILE=/path/to/Retro68-build/toolchain/powerpc-apple-macos/cmake/retroppc.toolchain.cmake")
 endif()
 
+# Stage 1 of the SDL2 rendering backend migration: build the vendored
+# laulandn/sdl2macos9 fork as libSDL2.a/libSDL2main.a. See
+# retro68/JA2_PPC_SDL2_MIGRATION_PLAN.md. Nothing below links against it yet.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SDL2Classic.cmake)
+
 add_application(JA2PPC
     ja2_mac.c
     ja2_mac_internal.h

@@ -1,0 +1,3 @@
+[submodule "retro68/third_party/sdl2macos9"]
+	path = retro68/third_party/sdl2macos9
+	url = https://github.com/laulandn/sdl2macos9.git
