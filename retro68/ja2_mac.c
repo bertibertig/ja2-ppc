@@ -42,6 +42,7 @@ static Boolean gMenuButtonsLoaded = 0;
 SDL_Surface *gMenuSurface;
 static SDL_Surface *gCreditsSurface;
 static SDL_Surface *gVideoSurface;
+static SDL_Surface *gPresentSurface;
 Boolean gActionScreenNeedsRender = 0;
 static short gMenuButton = -1;
 static short gMenuHoverButton = -1;
@@ -955,7 +956,6 @@ Boolean JA2InstallNormalCursor(void)
         return 0;
     }
     SDL_FillRect(gCursorSurface, NULL, JA2_CURSOR_TRANSPARENT_KEY);
-    SDL_SetColorKey(gCursorSurface, SDL_TRUE, JA2_CURSOR_TRANSPARENT_KEY);
     gCursorWidth = (short)width;
     gCursorHeight = (short)height;
 
@@ -994,21 +994,73 @@ Boolean JA2InstallNormalCursor(void)
     return 1;
 }
 
+static Boolean EnsurePresentSurface(void)
+{
+    if (gPresentSurface != NULL) {
+        return 1;
+    }
+    gPresentSurface = SDL_CreateRGBSurfaceWithFormat(0, JA2_SCREEN_WIDTH,
+        JA2_SCREEN_HEIGHT, 16, SDL_PIXELFORMAT_RGB555);
+    if (gPresentSurface == NULL) {
+        DebugLog("Renderer: present surface creation failed: %s", SDL_GetError());
+        return 0;
+    }
+    return 1;
+}
+
 static void DrawCursorOverlay(SDL_Surface *destination)
 {
-    SDL_Rect target;
     int mouseX;
     int mouseY;
+    int sourceX;
+    int sourceY;
+    int width;
+    int height;
+    int row;
+    int column;
 
-    if (gCursorSurface == NULL || destination == NULL) {
+    if (gCursorSurface == NULL || destination == NULL ||
+        gMenuScreen == MENU_SCREEN_INTRO) {
         return;
     }
     SDL_GetMouseState(&mouseX, &mouseY);
-    target.x = mouseX;
-    target.y = mouseY;
-    target.w = gCursorWidth;
-    target.h = gCursorHeight;
-    SDL_BlitSurface(gCursorSurface, NULL, destination, &target);
+    sourceX = mouseX < 0 ? -mouseX : 0;
+    sourceY = mouseY < 0 ? -mouseY : 0;
+    width = gCursorWidth - sourceX;
+    height = gCursorHeight - sourceY;
+    if (mouseX + width > destination->w) {
+        width = destination->w - mouseX;
+    }
+    if (mouseY + height > destination->h) {
+        height = destination->h - mouseY;
+    }
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    if (SDL_MUSTLOCK(gCursorSurface)) {
+        SDL_LockSurface(gCursorSurface);
+    }
+    if (SDL_MUSTLOCK(destination)) {
+        SDL_LockSurface(destination);
+    }
+    for (row = 0; row < height; ++row) {
+        Uint16 *sourceRow = (Uint16 *)((Uint8 *)gCursorSurface->pixels +
+            (long)(sourceY + row) * gCursorSurface->pitch) + sourceX;
+        Uint16 *destinationRow = (Uint16 *)((Uint8 *)destination->pixels +
+            (long)(mouseY + row) * destination->pitch) + mouseX;
+        for (column = 0; column < width; ++column) {
+            Uint16 pixel = sourceRow[column];
+            if (pixel != JA2_CURSOR_TRANSPARENT_KEY) {
+                destinationRow[column] = pixel;
+            }
+        }
+    }
+    if (SDL_MUSTLOCK(destination)) {
+        SDL_UnlockSurface(destination);
+    }
+    if (SDL_MUSTLOCK(gCursorSurface)) {
+        SDL_UnlockSurface(gCursorSurface);
+    }
 }
 
 void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
@@ -1018,16 +1070,23 @@ void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
     if (surface == NULL || gWindow == NULL) {
         return;
     }
+    if (!EnsurePresentSurface()) {
+        return;
+    }
     windowSurface = SDL_GetWindowSurface(gWindow);
     if (windowSurface == NULL) {
         DebugLog("Renderer: %s SDL_GetWindowSurface failed: %s", name, SDL_GetError());
         return;
     }
-    if (SDL_BlitSurface(surface, NULL, windowSurface, NULL) != 0) {
+    if (SDL_BlitSurface(surface, NULL, gPresentSurface, NULL) != 0) {
+        DebugLog("Renderer: %s RGB555 present copy failed: %s", name, SDL_GetError());
+        return;
+    }
+    DrawCursorOverlay(gPresentSurface);
+    if (SDL_BlitSurface(gPresentSurface, NULL, windowSurface, NULL) != 0) {
         DebugLog("Renderer: %s SDL_BlitSurface failed: %s", name, SDL_GetError());
         return;
     }
-    DrawCursorOverlay(windowSurface);
     if (SDL_UpdateWindowSurface(gWindow) != 0) {
         DebugLog("Renderer: %s SDL_UpdateWindowSurface failed: %s", name, SDL_GetError());
     }
@@ -1815,6 +1874,10 @@ int main(int argc, char *argv[])
     if (gVideoSurface != NULL) {
         SDL_FreeSurface(gVideoSurface);
         gVideoSurface = NULL;
+    }
+    if (gPresentSurface != NULL) {
+        SDL_FreeSurface(gPresentSurface);
+        gPresentSurface = NULL;
     }
     JA2TextShutdown();
     JA2PPCIntroShutdown();
