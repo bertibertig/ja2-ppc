@@ -95,6 +95,31 @@ This keeps `retro68/build-german-debug` etc. working as the single build
 entry point required by `AGENTS.md`, while being honest that the SDL2 layer
 is wrapped, not natively expressed in CMake.
 
+### Current implementation status
+
+The first direct game-shell rewrite is now implemented on branch
+`SDL2-Rework`:
+
+- `ja2_mac.c` uses SDL2 for window creation, event polling, fixed RGB555
+  composition surfaces, menu/splash rendering, credits, cursor compositing,
+  and the New Game action screens.
+- `ja2_game_init_options.c` renders the difficulty screen into the SDL2
+  RGB555 surface and uses SDL mouse coordinates instead of QuickDraw points.
+- `Intro.c` keeps the original intro sequencing and skip lifecycle, while
+  `Cinematics.c` decodes QuickTime into a private 16-bit GWorld and presents
+  each frame through the SDL2 surface bridge (`JA2PresentVideoWorld`). This
+  is the intentionally narrow Movie Toolbox exception described in the
+  Rendering Backend rules.
+- The clean Retro68 `JA2PPC_APPL` target and the German data bundle build
+  successfully after the rewrite.
+
+The implementation is **not yet hardware-verified** after this rewrite. The
+configured PowerBook G3 became unreachable before LaunchAPPL deployment
+(`FTP: No route to host`, LaunchAPPL port 1984 unavailable). Do not mark
+stages 3-7 complete until the Lombard has been restarted/reconnected and the
+startup splash, main menu, credits, difficulty/New Game flow, cursor, and all
+four intro videos have been checked from a fresh `JA2PPC-Debug.log`.
+
 ### Verified additional build/link requirements (Stage 1-2)
 
 Implemented in `retro68/cmake/SDL2Classic.cmake` and verified by building

@@ -1,7 +1,5 @@
 #include "Cinematics.h"
 
-#include "../../../ja2_mac_internal.h"
-
 #include <QuickTime.h>
 #include <Timer.h>
 #include <stdlib.h>
@@ -13,12 +11,12 @@ enum {
 
 #define JA2_GESTALT_QUICKTIME_VERSION \
     ((long)('q' << 24) | (long)('t' << 16) | (long)('i' << 8) | (long)'m')
-
-/* A zero budget only performs a small amount of idle work.  That is not
-   enough for MPEG decoding on slower PPC machines, and makes frame delivery
-   depend on unrelated event-loop work.  Twenty milliseconds is below the
-   25-fps frame interval while still returning regularly for input/events. */
 #define JA2_MOVIE_TASK_BUDGET_MS 20
+#define JA2_SCREEN_WIDTH 640
+#define JA2_SCREEN_HEIGHT 480
+
+void DebugLog(const char *format, ...);
+Boolean JA2PresentVideoWorld(GWorldPtr world);
 
 struct JA2PPCVideo {
     Movie movie;
@@ -29,7 +27,6 @@ struct JA2PPCVideo {
     unsigned long delayedPolls;
 };
 
-static WindowPtr gVideoWindow;
 static GWorldPtr gVideoFrameWorld;
 static Boolean gMoviesEntered;
 
@@ -48,24 +45,26 @@ static void MakeVideoPath(const char *entryName, Str255 path, Boolean leadingCol
     else if (strcmp(entryName, "PRAGUE_CR.SMK") == 0) name = "PRAGUE_CR.mpg";
     else if (strcmp(entryName, "PRAGUE.SMK") == 0) name = "PRAGUE.mpg";
     length = (short)strlen(name);
-    path[0] = (unsigned char)(length + (leadingColon ? 12 : 11));
     if (leadingColon) {
+        path[0] = (unsigned char)(length + 12);
         memcpy(&path[1], ":Data:Intro:", 12);
         memcpy(&path[13], name, length);
     } else {
+        path[0] = (unsigned char)(length + 11);
         memcpy(&path[1], "Data:Intro:", 11);
         memcpy(&path[12], name, length);
     }
 }
 
-Boolean JA2PPCVideoInitialize(WindowPtr window, GWorldPtr frameWorld)
+Boolean JA2PPCVideoInitialize(void *window, GWorldPtr frameWorld)
 {
     OSErr error;
     long quickTimeVersion = 0;
+    Rect bounds;
 
-    gVideoWindow = window;
+    (void)window;
     gVideoFrameWorld = frameWorld;
-    DebugLog("Video: initialized window=%p frameWorld=%p", window, frameWorld);
+    DebugLog("Video: initialized SDL presentation bridge frameWorld=%p", frameWorld);
     LogVideoMemory("before QuickTime initialization");
     if (window == NULL) {
         DebugLog("Video: initialization failed because window is null");
@@ -79,7 +78,14 @@ Boolean JA2PPCVideoInitialize(WindowPtr window, GWorldPtr frameWorld)
         }
         gMoviesEntered = 1;
         DebugLog("Video: QuickTime entered");
-        LogVideoMemory("after QuickTime initialization");
+    }
+    if (gVideoFrameWorld == NULL) {
+        SetRect(&bounds, 0, 0, JA2_SCREEN_WIDTH, JA2_SCREEN_HEIGHT);
+        error = NewGWorld(&gVideoFrameWorld, 16, &bounds, NULL, NULL, 0);
+        if (error != noErr || gVideoFrameWorld == NULL) {
+            DebugLog("Video: frame GWorld creation failed error=%d", error);
+            return 0;
+        }
     }
     error = Gestalt(JA2_GESTALT_QUICKTIME_VERSION, &quickTimeVersion);
     DebugLog("Video: QuickTime Gestalt error=%d version=%08lx", error,
@@ -110,14 +116,10 @@ JA2PPCVideo *JA2PPCVideoOpen(const char *archiveName, const char *entryName)
         MakeVideoPath(entryName, alternatePath, 0);
         error = FSMakeFSSpec(0, 0, alternatePath, &spec);
         if (error != noErr) {
-        DebugLog("Video: MPEG FSSpec unavailable entry=%s error=%d paths=colon+relative",
-                     entryName, error);
+            DebugLog("Video: MPEG FSSpec unavailable entry=%s error=%d", entryName, error);
             free(video);
             return NULL;
         }
-        DebugLog("Video: resolved MPEG using relative path form entry=%s", entryName);
-    } else {
-        DebugLog("Video: resolved MPEG using colon-relative path form entry=%s", entryName);
     }
     error = OpenMovieFile(&spec, &video->fileRefNum, fsRdPerm);
     if (error != noErr) {
@@ -134,16 +136,13 @@ JA2PPCVideo *JA2PPCVideoOpen(const char *archiveName, const char *entryName)
         free(video);
         return NULL;
     }
-    /* Infinite Mac can corrupt repeated frame GWorld-to-window CopyBits.
-       Let QuickTime own presentation directly in the color window instead. */
-    SetMovieGWorld(video->movie, (CGrafPtr)gVideoWindow, GetMainDevice());
-    SetRect(&movieBox, 0, 0, 640, 480);
+    SetMovieGWorld(video->movie, gVideoFrameWorld, GetMainDevice());
+    SetRect(&movieBox, 0, 0, JA2_SCREEN_WIDTH, JA2_SCREEN_HEIGHT);
     SetMovieBox(video->movie, &movieBox);
     GoToBeginningOfMovie(video->movie);
     StartMovie(video->movie);
     DebugLog("Video: QuickTime MPEG started entry=%s dataRefChanged=%d", entryName,
              dataRefChanged);
-    DebugLog("Video: Movie Toolbox task budget=%d ms", JA2_MOVIE_TASK_BUDGET_MS);
     LogVideoMemory("after movie start");
     return video;
 }
@@ -160,9 +159,8 @@ Boolean JA2PPCVideoPoll(JA2PPCVideo *video)
     }
     video->lastPollTicks = now;
     ++video->pollCount;
-    /* Give QuickTime enough time to decode a frame.  MoviesTask remains
-       bounded, so a slow decode cannot permanently starve system events. */
     MoviesTask(video->movie, JA2_MOVIE_TASK_BUDGET_MS);
+    JA2PresentVideoWorld(gVideoFrameWorld);
     video->done = IsMovieDone(video->movie);
     if ((video->pollCount % 120) == 0) {
         DebugLog("Video: polls=%lu delayed=%lu", video->pollCount,
@@ -173,14 +171,9 @@ Boolean JA2PPCVideoPoll(JA2PPCVideo *video)
 
 void JA2PPCVideoUpdate(JA2PPCVideo *video)
 {
-    OSErr error;
-
     if (video == NULL || video->movie == NULL) return;
-    /* Movies.h requires UpdateMovie to execute inside BeginUpdate/EndUpdate. */
-    error = UpdateMovie(video->movie);
-    if (error != noErr) {
-        DebugLog("Video: UpdateMovie failed error=%d", error);
-    }
+    UpdateMovie(video->movie);
+    JA2PresentVideoWorld(gVideoFrameWorld);
 }
 
 Boolean JA2PPCVideoDone(JA2PPCVideo *video)
@@ -202,19 +195,14 @@ void JA2PPCVideoClose(JA2PPCVideo *video)
     if (video == NULL) return;
     DebugLog("Video: closing playback object");
     if (video->movie != NULL) {
-        DebugLog("Video: stopping movie=%p", video->movie);
         StopMovie(video->movie);
         SetMovieActive(video->movie, 0);
-        DebugLog("Video: disposing movie=%p", video->movie);
         DisposeMovie(video->movie);
         video->movie = NULL;
-        DebugLog("Video: movie disposed");
     }
     if (video->fileRefNum != 0) {
-        DebugLog("Video: closing movie file ref=%d", video->fileRefNum);
         CloseMovieFile(video->fileRefNum);
         video->fileRefNum = 0;
-        DebugLog("Video: movie file closed");
     }
     free(video);
     LogVideoMemory("after movie close");
@@ -222,12 +210,15 @@ void JA2PPCVideoClose(JA2PPCVideo *video)
 
 void JA2PPCVideoShutdown(void)
 {
-    DebugLog("Video: shutdown window=%p frameWorld=%p", gVideoWindow, gVideoFrameWorld);
+    DebugLog("Video: shutdown");
     if (gMoviesEntered) {
         ExitMovies();
         gMoviesEntered = 0;
     }
-    gVideoWindow = NULL;
+    if (gVideoFrameWorld != NULL) {
+        DisposeGWorld(gVideoFrameWorld);
+        gVideoFrameWorld = NULL;
+    }
     gVideoFrameWorld = NULL;
     LogVideoMemory("after video shutdown");
 }

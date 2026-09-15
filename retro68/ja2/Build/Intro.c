@@ -12,7 +12,6 @@ static const short gIntroVideoCount =
 static JA2PPCVideo *gIntroVideo;
 static short gIntroVideoIndex;
 static Boolean gIntroActive;
-static Boolean gIntroCursorHidden;
 
 static Boolean OpenNextIntroVideo(void)
 {
@@ -33,26 +32,12 @@ Boolean JA2PPCIntroStart(void)
     if (gIntroActive) return 1;
     DebugLog("Intro: beginning sequence with %d videos", gIntroVideoCount);
     JA2MenuMusicStop();
-    /* QuickTime presents directly to the window. Release the menu cache before
-       movie import so this path remains viable in a 32 MB application zone. */
-    if (gMenuWorld != NULL) {
-        DisposeGWorld(gMenuWorld);
-        gMenuWorld = NULL;
-        DebugLog("Intro: released menu GWorld before video playback");
-    }
     if (!JA2PPCVideoInitialize(gWindow, NULL)) {
         DebugLog("Intro: video backend unavailable; sequence not started");
         return 0;
     }
-    InitCursor();
-    HideCursor();
-    gIntroCursorHidden = 1;
     gIntroVideoIndex = 0;
     if (!OpenNextIntroVideo()) {
-        if (gIntroCursorHidden) {
-            ShowCursor();
-            gIntroCursorHidden = 0;
-        }
         return 0;
     }
     gIntroActive = 1;
@@ -70,18 +55,9 @@ void JA2PPCIntroPoll(void)
 
     DebugLog("Intro: sequence complete; returning to New Game initialization");
     gIntroActive = 0;
-    if (gIntroCursorHidden) {
-        ShowCursor();
-        gIntroCursorHidden = 0;
-    }
     gMenuScreen = MENU_SCREEN_NEW_GAME;
     JA2InitializeNewGame();
     gActionScreenNeedsRender = 1;
-}
-
-void JA2PPCIntroUpdate(void)
-{
-    JA2PPCVideoUpdate(gIntroVideo);
 }
 
 void JA2PPCIntroSkip(void)
@@ -97,10 +73,6 @@ void JA2PPCIntroShutdown(void)
     if (gIntroVideo != NULL) {
         JA2PPCVideoClose(gIntroVideo);
         gIntroVideo = NULL;
-    }
-    if (gIntroCursorHidden) {
-        ShowCursor();
-        gIntroCursorHidden = 0;
     }
     gIntroActive = 0;
 }

@@ -2,17 +2,22 @@
  * Classic Mac video and event shell for the JA2 PPC port.
  *
  * The original SGP backend is a Win32/DirectDraw application. This file
- * replaces that platform shell with QuickDraw calls available in System 9's
- * InterfaceLib. Game systems can be connected here as they are migrated.
+ * replaces that platform shell with SDL2, using the laulandn/sdl2macos9
+ * macosclassic backend (which itself still uses QuickDraw's NewCWindow and
+ * a persistent window PixMap internally). See
+ * retro68/JA2_PPC_SDL2_MIGRATION_PLAN.md and AGENTS.md's "Rendering Backend
+ * (SDL2)" for the architecture this file implements.
+ *
+ * Every offscreen composition surface (gMenuSurface, gCreditsSurface, the
+ * cursor sprite) is a fixed SDL_PIXELFORMAT_RGB555 surface, regardless of
+ * the real display depth. Only JA2BlitSurfaceToWindow's SDL_BlitSurface call
+ * onto SDL_GetWindowSurface() may cross into the real display format; SDL2
+ * performs that conversion automatically. This is the documented fix for
+ * the PowerBook G3 Lombard mismatch (16-bit LCD, 32-bit VGA output).
  */
 
 #include <Quickdraw.h>
-#include <Fonts.h>
-#include <Windows.h>
-#include <Events.h>
-#include <Menus.h>
-#include <Files.h>
-#include <Palettes.h>
+#include <SDL.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -22,68 +27,47 @@
 #include "ja2_slf.h"
 #include "ja2_mac_internal.h"
 #include "ja2_game_init_options.h"
-
-#define JA2_SCREEN_WIDTH 640
-#define JA2_SCREEN_HEIGHT 480
+#include "ja2_ppc_text.h"
 
 #if defined(JA2_LANGUAGE_GERMAN)
-#define WINDOW_TITLE "\pJA2 PPC"
-#define PLATFORM_TEXT "\pPowerPC / System 9 Plattform"
-#define EVENT_TEXT "\pQuickDraw-Video und Macintosh-Ereignisschleife aktiv."
-#define QUIT_TEXT "\pZum Beenden Command-Q druecken oder Fenster schliessen."
-#define ARCHIVE_FORMAT "JA2-Datenarchive: %d/22"
-#define ENTRY_FORMAT "Data.slf-Dateien indiziert: %d"
-#define MENU_FOUND_TEXT "Hauptmenue-Grafik gefunden"
-#define MENU_MISSING_TEXT "Hauptmenue-Grafik fehlt"
-#define WORKING_DIRECTORY_TEXT "Arbeitsverzeichnis:"
-#define DATA_PATH_FORMAT "Relativer Datenpfad: :Data:Data.slf"
-#define DATA_LOCATION_TEXT "Data-Ordner: neben JA2PPC ablegen"
-#define INI_LOCATION_TEXT "JA2.ini: neben JA2PPC ablegen (noch nicht gelesen)"
+#define WINDOW_TITLE "JA2 PPC"
 #else
-#define WINDOW_TITLE "\pJA2 PPC"
-#define PLATFORM_TEXT "\pPowerPC / System 9 platform shell"
-#define EVENT_TEXT "\pQuickDraw video and Macintosh event loop online."
-#define QUIT_TEXT "\pPress Command-Q or close the window to quit."
-#define ARCHIVE_FORMAT "JA2 data archives: %d/22"
-#define ENTRY_FORMAT "Data.slf files indexed: %d"
-#define MENU_FOUND_TEXT "Main menu graphic found"
-#define MENU_MISSING_TEXT "Main menu graphic missing"
-#define WORKING_DIRECTORY_TEXT "Working directory:"
-#define DATA_PATH_FORMAT "Relative data path: :Data:Data.slf"
-#define DATA_LOCATION_TEXT "Put the Data folder beside JA2PPC"
-#define INI_LOCATION_TEXT "Put JA2.ini beside JA2PPC (not read yet)"
+#define WINDOW_TITLE "JA2 PPC"
 #endif
 
-WindowPtr gWindow;
-static WindowPtr gDiagnosticsWindow;
+SDL_Window *gWindow;
 static Boolean gRunning = 1;
 static Boolean gMenuBackgroundLoaded = 0;
 static Boolean gMenuButtonsLoaded = 0;
-GWorldPtr gMenuWorld;
-static GWorldPtr gCreditsWorld;
-static Boolean gMenuBlitLogged = 0;
-Boolean gMenuRenderDirectToWindow = 0;
-static Boolean gMainMenuNeedsRender = 0;
+SDL_Surface *gMenuSurface;
+static SDL_Surface *gCreditsSurface;
+static SDL_Surface *gVideoSurface;
 Boolean gActionScreenNeedsRender = 0;
 static short gMenuButton = -1;
 static short gMenuHoverButton = -1;
 static Boolean gStartupActive = 0;
-static unsigned long gStartupStartTicks;
-static unsigned long gCreditsStartTicks;
+static Uint32 gStartupStartTicks;
+static Uint32 gCreditsLastScrollTicks;
 static short gCreditsScrollOffset;
-static unsigned short gCreditsScrollPhase;
 static short gCreditsHoverFace = -1;
-static Boolean gCreditsBackgroundLoaded = 0;
 static short gCreditsLastLoggedScroll = -1;
-static Boolean gCreditsTextDiagnosticsLogged = 0;
-static Boolean gCreditsFrameCopyDiagnosticsLogged = 0;
-static char gDiagnosticsText[4096];
-static unsigned short gDiagnosticsLength;
-static Boolean gDrawingDiagnostics;
+
+/* Cursor compositing: a small color-keyed SDL surface blitted onto the
+   window surface at the current mouse position on every present, instead of
+   the classic Cursor Manager (HideCursor/ShowCursor). This removes that
+   whole balance-bug class per AGENTS.md's cursor-handling guidance: the OS
+   cursor is disabled once at startup and never re-enabled during play. */
+#define JA2_CURSOR_TRANSPARENT_KEY JA2_RGB555(255, 0, 255)
+static SDL_Surface *gCursorSurface;
+static short gCursorWidth;
+static short gCursorHeight;
+static int gLastMouseX = -1;
+static int gLastMouseY = -1;
 
 short gMenuScreen = MENU_SCREEN_MAIN;
 void RestoreMainMenu(void);
 static void RenderMainMenuDirectly(void);
+static void PresentCurrentScreen(void);
 
 typedef struct {
     short x;
@@ -128,97 +112,6 @@ static const char *gCredits[] = {
 };
 static const short gCreditsCount = sizeof(gCredits) / sizeof(gCredits[0]);
 
-void DebugLog(const char *format, ...);
-
-static PixMapHandle GetMenuRenderPixMap(void)
-{
-    if (gMenuRenderDirectToWindow) {
-        SetPort(gWindow);
-        return ((CWindowPtr)gWindow)->portPixMap;
-    }
-    if (gMenuScreen == MENU_SCREEN_CREDITS && gCreditsWorld != NULL) {
-        SetGWorld(gCreditsWorld, NULL);
-        return GetGWorldPixMap(gCreditsWorld);
-    }
-    SetGWorld(gMenuWorld, NULL);
-    return GetGWorldPixMap(gMenuWorld);
-}
-
-static void SetAllDisplayDepths(void)
-{
-    GDHandle device;
-    OSErr error;
-    short deviceIndex = 0;
-
-    /* The original renderer selects a native 16-bit format per display.
-       Classic QuickDraw uses RGB555 GWorlds on this PowerBook. */
-    for (device = GetDeviceList(); device != NULL;
-         device = GetNextDevice(device), ++deviceIndex) {
-        if ((**device).gdFlags & screenDevice) {
-            error = SetDepth(device, 16, 0, 0);
-            DebugLog("Display depth: device=%d handle=%p result=%d depth=%d",
-                     deviceIndex, device, error, (**device).gdPMap == NULL ? 0 :
-                     (**(**device).gdPMap).pixelSize);
-        }
-    }
-}
-
-static void SelectWindowGWorld(void)
-{
-    CGrafPtr currentPort;
-    GDHandle windowDevice;
-
-    /* GetMainDevice() is not necessarily the device owning this window when
-       the PowerBook LCD and VGA display are mirrored or reordered. */
-    SetPort(gWindow);
-    GetGWorld(&currentPort, &windowDevice);
-    if (windowDevice == NULL) {
-        windowDevice = GetMainDevice();
-    }
-    SetGWorld((CGrafPtr)gWindow, windowDevice);
-}
-
-static void LogPixMap(const char *name, PixMapHandle pixMap)
-{
-    if (pixMap == NULL) {
-        DebugLog("Renderer: %s PixMap is null", name);
-        return;
-    }
-    DebugLog("Renderer: %s PixMap bounds=%d,%d,%d,%d rowBytes=%ld depth=%d",
-             name, (**pixMap).bounds.left, (**pixMap).bounds.top,
-             (**pixMap).bounds.right, (**pixMap).bounds.bottom,
-             (long)((**pixMap).rowBytes & 0x3fff), (**pixMap).pixelSize);
-}
-
-static void LogPixMapSamples(const char *name, PixMapHandle pixMap)
-{
-    static const short sampleX[] = { 0, 32, 320, 600 };
-    static const short sampleY[] = { 0, 240, 240, 440 };
-    unsigned char *base;
-    long rowBytes;
-    unsigned short index;
-
-    if (pixMap == NULL || !LockPixels(pixMap)) {
-        DebugLog("Renderer: cannot lock %s PixMap for pixel diagnostics", name);
-        return;
-    }
-    base = (unsigned char *)GetPixBaseAddr(pixMap);
-    rowBytes = (**pixMap).rowBytes & 0x3fff;
-    for (index = 0; index < 4; ++index) {
-        if ((**pixMap).pixelSize == 16) {
-            unsigned short *pixel = (unsigned short *)(base +
-                (long)(sampleY[index] - (**pixMap).bounds.top) * rowBytes +
-                (long)(sampleX[index] - (**pixMap).bounds.left) * 2);
-            DebugLog("Renderer: %s pixel %d,%d RGB555=%04x", name,
-                     sampleX[index], sampleY[index], *pixel);
-        } else {
-            DebugLog("Renderer: %s pixel diagnostics unsupported depth=%d", name,
-                     (**pixMap).pixelSize);
-        }
-    }
-    UnlockPixels(pixMap);
-}
-
 void DebugLog(const char *format, ...)
 {
     va_list arguments;
@@ -231,14 +124,7 @@ void DebugLog(const char *format, ...)
     va_end(arguments);
     lineLength = (short)strlen(line);
     if (lineLength > 250) {
-        lineLength = 250;
-        line[lineLength] = 0;
-    }
-    if (gDiagnosticsLength + lineLength + 1 < sizeof(gDiagnosticsText)) {
-        memcpy(&gDiagnosticsText[gDiagnosticsLength], line, lineLength);
-        gDiagnosticsLength += lineLength;
-        gDiagnosticsText[gDiagnosticsLength++] = '\r';
-        gDiagnosticsText[gDiagnosticsLength] = 0;
+        line[250] = 0;
     }
 #if defined(JA2_DEBUG_BUILD)
     file = fopen("JA2PPC-Debug.log", "a");
@@ -248,11 +134,8 @@ void DebugLog(const char *format, ...)
         fclose(file);
     }
 #else
-    file = NULL;
+    (void)file;
 #endif
-    if (gDiagnosticsWindow != NULL && !gDrawingDiagnostics) {
-        InvalRect(&gDiagnosticsWindow->portRect);
-    }
 }
 
 static const char *gRequiredLibraries[] = {
@@ -288,186 +171,133 @@ static unsigned long ReadLittleEndian32(const unsigned char *bytes)
            ((unsigned long)bytes[3] << 24);
 }
 
-static short CountDataArchiveEntries(void)
-{
-    FILE *file;
-    unsigned char header[532];
-    unsigned char entry[280];
-    unsigned long entryCount;
-    long archiveSize;
-    long directoryOffset;
-    short validEntries = 0;
-
-    file = fopen(":Data:Data.slf", "rb");
-    if (file == NULL) {
-        file = fopen("Data/Data.slf", "rb");
-    }
-    if (file == NULL || fread(header, 1, sizeof(header), file) != sizeof(header)) {
-        if (file != NULL) {
-            fclose(file);
-        }
-        return -1;
-    }
-
-    /* SLF was written on little-endian PCs; do not cast these fields on PPC. */
-    entryCount = ReadLittleEndian32(&header[512]);
-    if (entryCount == 0 || entryCount > 65535) {
-        fclose(file);
-        return -1;
-    }
-    if (fseek(file, 0, SEEK_END) != 0) {
-        fclose(file);
-        return -1;
-    }
-    archiveSize = ftell(file);
-    directoryOffset = archiveSize - ((long)entryCount * (long)sizeof(entry));
-    if (directoryOffset < (long)sizeof(header) || fseek(file, directoryOffset, SEEK_SET) != 0) {
-        fclose(file);
-        return -1;
-    }
-
-    while (entryCount-- != 0) {
-        if (fread(entry, 1, sizeof(entry), file) != sizeof(entry)) {
-            fclose(file);
-            return -1;
-        }
-        if (entry[264] == 0) {
-            ++validEntries;
-        }
-    }
-    fclose(file);
-    return validEntries;
-}
-
-static short FindDataArchiveFile(const char *archiveName, const char *wantedName,
-                                unsigned long *fileOffset, unsigned long *fileLength)
-{
-    FILE *file;
-    unsigned char header[532];
-    unsigned char entry[280];
-    char entryName[257];
-    unsigned long entryCount;
-    long archiveSize;
-    long directoryOffset;
-    short found = 0;
-
-    if (fileOffset != NULL) {
-        *fileOffset = 0;
-    }
-    DebugLog("Searching %s for %s", archiveName, wantedName);
-    if (fileLength != NULL) {
-        *fileLength = 0;
-    }
-
-    sprintf(entryName, ":Data:%s", archiveName);
-    file = fopen(entryName, "rb");
-    if (file == NULL) {
-        sprintf(entryName, "Data/%s", archiveName);
-        file = fopen(entryName, "rb");
-    }
-    if (file == NULL || fread(header, 1, sizeof(header), file) != sizeof(header)) {
-        DebugLog("Cannot open/read archive %s", archiveName);
-        if (file != NULL) {
-            fclose(file);
-        }
-        return 0;
-    }
-
-    entryCount = ReadLittleEndian32(&header[512]);
-    if (entryCount == 0 || entryCount > 65535 || fseek(file, 0, SEEK_END) != 0) {
-        DebugLog("Invalid directory count in %s: %lu", archiveName, entryCount);
-        fclose(file);
-        return 0;
-    }
-    archiveSize = ftell(file);
-    directoryOffset = archiveSize - ((long)entryCount * (long)sizeof(entry));
-    if (directoryOffset < (long)sizeof(header) || fseek(file, directoryOffset, SEEK_SET) != 0) {
-        fclose(file);
-        return 0;
-    }
-
-    while (entryCount-- != 0) {
-        unsigned short index;
-        if (fread(entry, 1, sizeof(entry), file) != sizeof(entry)) {
-            fclose(file);
-            return 0;
-        }
-        for (index = 0; index < 256 && entry[index] != 0; ++index) {
-            entryName[index] = entry[index];
-        }
-        entryName[index] = 0;
-        for (index = 0; entryName[index] != 0; ++index) {
-            if (entryName[index] >= 'a' && entryName[index] <= 'z') {
-                entryName[index] = (char)(entryName[index] - 'a' + 'A');
-            }
-        }
-        if (strcmp(entryName, wantedName) == 0 && entry[264] == 0) {
-            found = 1;
-            if (fileOffset != NULL) {
-                *fileOffset = ReadLittleEndian32(&entry[256]);
-            }
-            if (fileLength != NULL) {
-                *fileLength = ReadLittleEndian32(&entry[260]);
-            }
-            DebugLog("Found %s offset=%lu length=%lu", entryName,
-                     ReadLittleEndian32(&entry[256]), ReadLittleEndian32(&entry[260]));
-            break;
-        }
-    }
-    fclose(file);
-    return found;
-}
-
 static unsigned short ReadLittleEndian16(const unsigned char *bytes)
 {
     return (unsigned short)(bytes[0] | ((unsigned short)bytes[1] << 8));
 }
 
-static void WriteMenuPixel(PixMapHandle pixMap, short x, short y,
-                           const RGBColor *color)
+/* Direct, bounds-checked pixel write into a fixed RGB555 surface. Every
+   decoder in this file targets an offscreen surface with this format, so no
+   per-call format branch is needed (AGENTS.md color depth policy). */
+static void WriteRawPixel(SDL_Surface *surface, short x, short y, Uint16 color)
 {
-    unsigned char *base = (unsigned char *)GetPixBaseAddr(pixMap);
-    long rowBytes = (**pixMap).rowBytes & 0x3fff;
-    unsigned short *pixel = (unsigned short *)(base +
-        (long)(y - (**pixMap).bounds.top) * rowBytes +
-        (long)(x - (**pixMap).bounds.left) * 2);
+    Uint16 *row;
 
-    /* NewGWorld(16) uses Classic QuickDraw's xRGB555 layout, rather than
-       the RGB565 layout used by some DirectDraw adapters. */
-    *pixel = (unsigned short)(((color->red >> 11) << 10) |
-                              ((color->green >> 11) << 5) |
-                              (color->blue >> 11));
+    if (surface == NULL || x < 0 || y < 0 || x >= surface->w || y >= surface->h) {
+        return;
+    }
+    row = (Uint16 *)((Uint8 *)surface->pixels + (long)y * surface->pitch);
+    row[x] = color;
 }
 
-static Boolean EnsureMenuWorld(void)
+static void WriteMenuPixel(SDL_Surface *surface, short x, short y,
+                           const RGBColor *color)
 {
-    QDErr worldError;
-    Rect worldBounds = { -40, -40, 560, 760 };
+    WriteRawPixel(surface, x, y,
+                  JA2_RGB555(color->red >> 8, color->green >> 8, color->blue >> 8));
+}
 
-    if (gMenuWorld != NULL) {
+void FillRectRGB555(SDL_Surface *surface, short left, short top,
+                    short right, short bottom, Uint16 color)
+{
+    SDL_Rect rect;
+
+    rect.x = left;
+    rect.y = top;
+    rect.w = (int)(right - left);
+    rect.h = (int)(bottom - top);
+    SDL_FillRect(surface, &rect, color);
+}
+
+void FrameRectRGB555(SDL_Surface *surface, short left, short top,
+                     short right, short bottom, Uint16 color)
+{
+    FillRectRGB555(surface, left, top, right, (short)(top + 1), color);
+    FillRectRGB555(surface, left, (short)(bottom - 1), right, bottom, color);
+    FillRectRGB555(surface, left, top, (short)(left + 1), bottom, color);
+    FillRectRGB555(surface, (short)(right - 1), top, right, bottom, color);
+}
+
+void DrawLineRGB555(SDL_Surface *surface, short x0, short y0,
+                    short x1, short y1, Uint16 color)
+{
+    int dx = abs((int)(x1 - x0));
+    int sx = x0 < x1 ? 1 : -1;
+    int dy = -abs((int)(y1 - y0));
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    int e2;
+
+    for (;;) {
+        WriteRawPixel(surface, x0, y0, color);
+        if (x0 == x1 && y0 == y1) {
+            break;
+        }
+        e2 = 2 * err;
+        if (e2 >= dy) {
+            err += dy;
+            x0 = (short)(x0 + sx);
+        }
+        if (e2 <= dx) {
+            err += dx;
+            y0 = (short)(y0 + sy);
+        }
+    }
+}
+
+void DrawCString(SDL_Surface *destination, short x, short y, const char *text,
+                 Uint16 color)
+{
+    JA2DrawText(destination, x, y, text, color, 13);
+}
+
+static void DrawCenteredCString(SDL_Surface *destination, short y, const char *text,
+                                Uint16 color)
+{
+    short width = JA2TextWidth(text, 12);
+    JA2DrawText(destination, (short)((JA2_SCREEN_WIDTH - width) / 2), y, text, color, 12);
+}
+
+static void DrawCreditsColumnString(SDL_Surface *destination, short y, const char *text,
+                                    Uint16 color, short size)
+{
+    short width = JA2TextWidth(text, size);
+    JA2DrawText(destination, (short)(10 + (210 - width) / 2), y, text, color, size);
+}
+
+static SDL_Surface *GetMenuRenderSurface(void)
+{
+    if (gMenuScreen == MENU_SCREEN_CREDITS && gCreditsSurface != NULL) {
+        return gCreditsSurface;
+    }
+    return gMenuSurface;
+}
+
+static Boolean EnsureMenuSurface(void)
+{
+    if (gMenuSurface != NULL) {
         return 1;
     }
-    DebugLog("Renderer: creating RGB555 800x600 transfer world");
-    worldError = NewGWorld(&gMenuWorld, 16, &worldBounds, NULL, NULL, 0);
-    if (worldError != noErr || gMenuWorld == NULL) {
-        DebugLog("Renderer: RGB555 NewGWorld failed error=%d", worldError);
+    gMenuSurface = SDL_CreateRGBSurfaceWithFormat(0, JA2_SCREEN_WIDTH,
+        JA2_SCREEN_HEIGHT, 16, SDL_PIXELFORMAT_RGB555);
+    if (gMenuSurface == NULL) {
+        DebugLog("Renderer: menu surface creation failed: %s", SDL_GetError());
         return 0;
     }
     return 1;
 }
 
-static Boolean EnsureCreditsWorld(void)
+static Boolean EnsureCreditsSurface(void)
 {
-    QDErr worldError;
-    Rect worldBounds = { -40, -40, 560, 760 };
-
-    if (gCreditsWorld != NULL) return 1;
-    worldError = NewGWorld(&gCreditsWorld, 16, &worldBounds, NULL, NULL, 0);
-    if (worldError != noErr || gCreditsWorld == NULL) {
-        DebugLog("Credits: RGB555 frame GWorld creation failed error=%d", worldError);
+    if (gCreditsSurface != NULL) {
+        return 1;
+    }
+    gCreditsSurface = SDL_CreateRGBSurfaceWithFormat(0, JA2_SCREEN_WIDTH,
+        JA2_SCREEN_HEIGHT, 16, SDL_PIXELFORMAT_RGB555);
+    if (gCreditsSurface == NULL) {
+        DebugLog("Credits: frame surface creation failed: %s", SDL_GetError());
         return 0;
     }
-    DebugLog("Credits: created RGB555 compositing GWorld");
     return 1;
 }
 
@@ -496,7 +326,7 @@ static Boolean RenderMenuLogo(void)
     short offsetX;
     short offsetY;
     RGBColor color;
-    PixMapHandle menuPixMap;
+    SDL_Surface *destination;
 
     archive = JA2SLFOpen("LoadScreens.slf");
     if (archive == NULL || !JA2SLFFind(archive, "JA2LOGO.STI", &fileOffset,
@@ -533,8 +363,6 @@ static Boolean RenderMenuLogo(void)
     }
     memcpy(palette, fileData + 64, sizeof(palette));
     memcpy(object, fileData + 64 + 768, sizeof(object));
-    /* The STCI header describes the full canvas. The subimage record gives
-       the actual drawable bounds and offset used by the original blitter. */
     offsetX = (short)ReadLittleEndian16(&object[8]);
     offsetY = (short)ReadLittleEndian16(&object[10]);
     height = ReadLittleEndian16(&object[12]);
@@ -555,8 +383,8 @@ static Boolean RenderMenuLogo(void)
     memcpy(pixels, fileData + 64 + 768 + 16, storedSize);
     free(fileData);
     source = pixels + dataOffset;
-    menuPixMap = GetMenuRenderPixMap();
-    if (menuPixMap == NULL || !LockPixels(menuPixMap)) {
+    destination = GetMenuRenderSurface();
+    if (destination == NULL) {
         free(pixels);
         return 0;
     }
@@ -572,7 +400,6 @@ static Boolean RenderMenuLogo(void)
             }
             run = (unsigned short)(control & 0x7f);
             if (run == 0 || x + run > width) {
-                UnlockPixels(menuPixMap);
                 free(pixels);
                 return 0;
             }
@@ -581,7 +408,6 @@ static Boolean RenderMenuLogo(void)
             } else {
                 sourceUsed = (unsigned long)(source - (pixels + dataOffset));
                 if (sourceUsed + run > dataLength) {
-                    UnlockPixels(menuPixMap);
                     free(pixels);
                     return 0;
                 }
@@ -590,23 +416,18 @@ static Boolean RenderMenuLogo(void)
                     color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
                     color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
                     color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
-                    WriteMenuPixel(menuPixMap, (short)(188 + offsetX + x),
+                    WriteMenuPixel(destination, (short)(188 + offsetX + x),
                                    (short)(15 + offsetY + y), &color);
                     ++x;
                 }
             }
         }
-        /* ETRLE stores a zero after every scanline. A literal/transparent run
-           can end exactly at width, which otherwise leaves that zero to be
-           decoded as a blank row on the next iteration. */
         if (x == width &&
             (unsigned long)(source - (pixels + dataOffset)) < dataLength &&
             *source == 0) {
             ++source;
         }
     }
-    UnlockPixels(menuPixMap);
-    SetPort(gWindow);
     free(pixels);
     return 1;
 }
@@ -654,7 +475,6 @@ static Boolean RenderStartupSplash(void)
     short offsetX;
     short offsetY;
     RGBColor color;
-    PixMapHandle menuPixMap;
     unsigned short candidate;
 
     archive = NULL;
@@ -665,8 +485,6 @@ static Boolean RenderStartupSplash(void)
             DebugLog("Startup: cannot open %s", archiveNames[candidate]);
             continue;
         }
-        DebugLog("Startup: opened %s with %lu entries", archiveNames[candidate],
-                 JA2SLFEntryCount(archive));
         if (JA2SLFFind(archive, entryNames[candidate], &fileOffset, &fileLength)) {
             DebugLog("Startup: found %s in %s at %lu length %lu",
                      entryNames[candidate], archiveNames[candidate], fileOffset,
@@ -696,7 +514,6 @@ static Boolean RenderStartupSplash(void)
         JA2SLFClose(archive);
         return 0;
     }
-    DebugLog("Startup: read logo entry (%lu bytes)", fileLength);
     JA2SLFClose(archive);
     if (memcmp(fileData, "STCI", 4) != 0) {
         DebugLog("Startup: logo entry has no STCI header");
@@ -715,17 +532,12 @@ static Boolean RenderStartupSplash(void)
             width == 0 || height == 0 || width > JA2_SCREEN_WIDTH ||
             height > JA2_SCREEN_HEIGHT || storedSize != (unsigned long)width * height * 2 ||
             fileLength < 64 + storedSize) {
-            DebugLog("Startup: unsupported RGB STCI %ux%u depth=%u masks=%08lx/%08lx/%08lx stored=%lu",
-                     width, height, header[44], ReadLittleEndian32(&header[24]),
-                     ReadLittleEndian32(&header[28]), ReadLittleEndian32(&header[32]),
-                     storedSize);
+            DebugLog("Startup: unsupported RGB STCI %ux%u depth=%u", width, height,
+                     header[44]);
             free(fileData);
             return 0;
         }
-        SetGWorld(gMenuWorld, NULL);
-        menuPixMap = GetGWorldPixMap(gMenuWorld);
-        if (menuPixMap == NULL || !LockPixels(menuPixMap)) {
-            DebugLog("Startup: unable to lock RGB logo destination PixMap");
+        if (!EnsureMenuSurface()) {
             free(fileData);
             return 0;
         }
@@ -739,11 +551,9 @@ static Boolean RenderStartupSplash(void)
                 color.red = (unsigned short)(((pixel >> 11) * 65535UL) / 31);
                 color.green = (unsigned short)((((pixel >> 5) & 0x3f) * 65535UL) / 63);
                 color.blue = (unsigned short)(((pixel & 0x1f) * 65535UL) / 31);
-                WriteMenuPixel(menuPixMap, (short)x, (short)y, &color);
+                WriteMenuPixel(gMenuSurface, (short)x, (short)y, &color);
             }
         }
-        UnlockPixels(menuPixMap);
-        SetPort(gWindow);
         free(fileData);
         DebugLog("Startup: RGB565 logo render complete");
         return 1;
@@ -784,10 +594,7 @@ static Boolean RenderStartupSplash(void)
     memcpy(pixels, fileData + 64 + 768 + 16, storedSize);
     free(fileData);
 
-    SetGWorld(gMenuWorld, NULL);
-    menuPixMap = GetGWorldPixMap(gMenuWorld);
-    if (menuPixMap == NULL || !LockPixels(menuPixMap)) {
-        DebugLog("Startup: unable to lock logo destination PixMap");
+    if (!EnsureMenuSurface()) {
         free(pixels);
         return 0;
     }
@@ -802,7 +609,6 @@ static Boolean RenderStartupSplash(void)
             run = (unsigned short)(control & 0x7f);
             if (run == 0 || x + run > width) {
                 DebugLog("Startup: bad logo ETRLE run row=%u x=%u run=%u", y, x, run);
-                UnlockPixels(menuPixMap);
                 free(pixels);
                 return 0;
             }
@@ -813,7 +619,6 @@ static Boolean RenderStartupSplash(void)
                 if (sourceUsed + run > dataLength) {
                     DebugLog("Startup: truncated logo ETRLE row=%u x=%u run=%u",
                              y, x, run);
-                    UnlockPixels(menuPixMap);
                     free(pixels);
                     return 0;
                 }
@@ -822,7 +627,7 @@ static Boolean RenderStartupSplash(void)
                     color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
                     color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
                     color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
-                    WriteMenuPixel(menuPixMap, (short)(offsetX + x),
+                    WriteMenuPixel(gMenuSurface, (short)(offsetX + x),
                                    (short)(offsetY + y), &color);
                     ++x;
                 }
@@ -834,8 +639,6 @@ static Boolean RenderStartupSplash(void)
             ++source;
         }
     }
-    UnlockPixels(menuPixMap);
-    SetPort(gWindow);
     free(pixels);
     return 1;
 }
@@ -862,7 +665,6 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
     unsigned short imageHeight;
     unsigned short objectCount;
     unsigned short item;
-    unsigned short index;
     unsigned short y;
     unsigned short x;
     unsigned short run;
@@ -871,7 +673,7 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
     short offsetX;
     short offsetY;
     RGBColor color;
-    PixMapHandle menuPixMap;
+    SDL_Surface *destination;
     unsigned char *source;
 
 #if defined(JA2_LANGUAGE_GERMAN)
@@ -904,8 +706,6 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
         return 0;
     }
     storedSize = ReadLittleEndian32(&header[8]);
-    imageHeight = ReadLittleEndian16(&header[20]);
-    imageWidth = ReadLittleEndian16(&header[22]);
     objectCount = ReadLittleEndian16(&header[28]);
     if (objectCount == 0 || objectCount <= objectIndex[4][1] ||
         ReadLittleEndian32(&header[24]) != 256 ||
@@ -915,8 +715,8 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
     }
     memcpy(palette, fileData + 64, sizeof(palette));
     pixels = fileData + 64 + 768 + (unsigned long)objectCount * 16;
-    menuPixMap = GetMenuRenderPixMap();
-    if (menuPixMap == NULL || !LockPixels(menuPixMap)) {
+    destination = GetMenuRenderSurface();
+    if (destination == NULL) {
         free(fileData);
         return 0;
     }
@@ -931,7 +731,6 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
         imageWidth = ReadLittleEndian16(&object[14]);
         if (dataOffset + dataLength > storedSize || imageWidth == 0 ||
             imageHeight == 0) {
-            UnlockPixels(menuPixMap);
             free(fileData);
             return 0;
         }
@@ -944,7 +743,6 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
                 if (control == 0) break;
                 run = (unsigned short)(control & 0x7f);
                 if (run == 0 || x + run > imageWidth) {
-                    UnlockPixels(menuPixMap);
                     free(fileData);
                     return 0;
                 }
@@ -953,7 +751,6 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
                 } else {
                     if ((unsigned long)(source - (pixels + dataOffset)) + run >
                         dataLength) {
-                        UnlockPixels(menuPixMap);
                         free(fileData);
                         return 0;
                     }
@@ -962,7 +759,7 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
                         color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
                         color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
                         color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
-                        WriteMenuPixel(menuPixMap,
+                        WriteMenuPixel(destination,
                                        (short)(320 - imageWidth / 2 + offsetX + x),
                                        (short)(277 + item * 37 + offsetY + y),
                                        &color);
@@ -977,8 +774,6 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
             }
         }
     }
-    UnlockPixels(menuPixMap);
-    SetPort(gWindow);
     free(fileData);
     return 1;
 }
@@ -988,7 +783,8 @@ static Boolean RenderMenuButtons(void)
     return RenderMenuButtonFrames(0, 4, gMenuHoverButton);
 }
 
-Boolean JA2RenderInterfaceButton(short objectIndex, short x, short y)
+Boolean JA2RenderInterfaceButton(SDL_Surface *destination, short objectIndex,
+                                 short x, short y)
 {
     JA2SLFArchive *archive;
     unsigned char *fileData;
@@ -1006,10 +802,9 @@ Boolean JA2RenderInterfaceButton(short objectIndex, short x, short y)
     unsigned short column;
     unsigned short run;
     unsigned char control;
-    PixMapHandle pixMap;
     unsigned char *source;
 
-    if (objectIndex < 0) return 0;
+    if (objectIndex < 0 || destination == NULL) return 0;
     archive = JA2SLFOpen("Interface.slf");
     if (archive == NULL || !JA2SLFFind(archive, "PreferencesButtons.sti",
                                        &fileOffset, &fileLength)) {
@@ -1052,12 +847,6 @@ Boolean JA2RenderInterfaceButton(short objectIndex, short x, short y)
                  objectIndex, imageWidth, imageHeight, dataOffset, dataLength);
         return 0;
     }
-    pixMap = GetMenuRenderPixMap();
-    if (pixMap == NULL || !LockPixels(pixMap)) {
-        free(fileData);
-        DebugLog("Button loader: cannot lock destination for object=%d", objectIndex);
-        return 0;
-    }
     source = pixels + dataOffset;
     for (row = 0; row < imageHeight; ++row) {
         column = 0;
@@ -1067,7 +856,6 @@ Boolean JA2RenderInterfaceButton(short objectIndex, short x, short y)
             if (control == 0) break;
             run = (unsigned short)(control & 0x7f);
             if (run == 0 || column + run > imageWidth) {
-                UnlockPixels(pixMap);
                 free(fileData);
                 return 0;
             }
@@ -1075,7 +863,6 @@ Boolean JA2RenderInterfaceButton(short objectIndex, short x, short y)
                 column = (unsigned short)(column + run);
             } else {
                 if ((unsigned long)(source - (pixels + dataOffset)) + run > dataLength) {
-                    UnlockPixels(pixMap);
                     free(fileData);
                     return 0;
                 }
@@ -1085,7 +872,7 @@ Boolean JA2RenderInterfaceButton(short objectIndex, short x, short y)
                     color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
                     color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
                     color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
-                    WriteMenuPixel(pixMap, (short)(x + column), (short)(y + row), &color);
+                    WriteMenuPixel(destination, (short)(x + column), (short)(y + row), &color);
                     ++column;
                 }
             }
@@ -1095,8 +882,6 @@ Boolean JA2RenderInterfaceButton(short objectIndex, short x, short y)
             ++source;
         }
     }
-    UnlockPixels(pixMap);
-    SetPort(gWindow);
     free(fileData);
     DebugLog("Button loader: rendered PreferencesButtons object=%d at %d,%d size=%ux%u",
              objectIndex, x, y, imageWidth, imageHeight);
@@ -1121,13 +906,11 @@ Boolean JA2InstallNormalCursor(void)
     unsigned short column;
     unsigned short run;
     unsigned char control;
-    Cursor cursor;
 
     archive = JA2SLFOpen("Cursors.slf");
     if (archive == NULL || !JA2SLFFind(archive, "CURSOR.STI", &fileOffset, &fileLength)) {
         if (archive != NULL) JA2SLFClose(archive);
-        DebugLog("Cursor loader: CURSOR.STI unavailable; using Toolbox cursor");
-        InitCursor();
+        DebugLog("Cursor loader: CURSOR.STI unavailable");
         return 0;
     }
     fileData = (unsigned char *)malloc(fileLength);
@@ -1135,7 +918,6 @@ Boolean JA2InstallNormalCursor(void)
         free(fileData);
         JA2SLFClose(archive);
         DebugLog("Cursor loader: cannot read CURSOR.STI length=%lu", fileLength);
-        InitCursor();
         return 0;
     }
     JA2SLFClose(archive);
@@ -1146,7 +928,6 @@ Boolean JA2InstallNormalCursor(void)
         fileLength < 64 + 768 + (unsigned long)objectCount * 16 + storedSize) {
         free(fileData);
         DebugLog("Cursor loader: invalid CURSOR.STI object count=%u", objectCount);
-        InitCursor();
         return 0;
     }
     {
@@ -1156,16 +937,28 @@ Boolean JA2InstallNormalCursor(void)
         height = ReadLittleEndian16(&object[12]);
         width = ReadLittleEndian16(&object[14]);
     }
-    if (width == 0 || height == 0 || width > 16 || height > 16 ||
-        dataOffset + dataLength > storedSize) {
+    if (width == 0 || height == 0 || dataOffset + dataLength > storedSize) {
         free(fileData);
         DebugLog("Cursor loader: unsupported cursor size=%ux%u", width, height);
-        InitCursor();
         return 0;
     }
-    memset(&cursor, 0, sizeof(cursor));
-    cursor.hotSpot.h = 0;
-    cursor.hotSpot.v = 0;
+
+    if (gCursorSurface != NULL) {
+        SDL_FreeSurface(gCursorSurface);
+        gCursorSurface = NULL;
+    }
+    gCursorSurface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 16,
+        SDL_PIXELFORMAT_RGB555);
+    if (gCursorSurface == NULL) {
+        DebugLog("Cursor loader: surface creation failed: %s", SDL_GetError());
+        free(fileData);
+        return 0;
+    }
+    SDL_FillRect(gCursorSurface, NULL, JA2_CURSOR_TRANSPARENT_KEY);
+    SDL_SetColorKey(gCursorSurface, SDL_TRUE, JA2_CURSOR_TRANSPARENT_KEY);
+    gCursorWidth = (short)width;
+    gCursorHeight = (short)height;
+
     pixels = fileData + 64 + 768 + (unsigned long)objectCount * 16;
     source = pixels + dataOffset;
     for (row = 0; row < height; ++row) {
@@ -1182,177 +975,114 @@ Boolean JA2InstallNormalCursor(void)
                 while (run-- != 0 &&
                        (unsigned long)(source - (pixels + dataOffset)) < dataLength) {
                     unsigned char paletteIndex = *source++;
-                    unsigned short bit = (unsigned short)(0x8000 >> column);
-                    unsigned short brightness =
-                        (unsigned short)fileData[64 + paletteIndex * 3] +
-                        (unsigned short)fileData[64 + paletteIndex * 3 + 1] +
-                        (unsigned short)fileData[64 + paletteIndex * 3 + 2];
-                    cursor.mask[row] |= bit;
-                    if (brightness > 384) cursor.data[row] |= bit;
+                    Uint16 color = JA2_RGB555(fileData[64 + paletteIndex * 3],
+                                              fileData[64 + paletteIndex * 3 + 1],
+                                              fileData[64 + paletteIndex * 3 + 2]);
+                    if (color == JA2_CURSOR_TRANSPARENT_KEY) {
+                        /* Avoid an opaque cursor pixel colliding with the
+                           transparency key by nudging it off-key. */
+                        color = (Uint16)(color ^ 0x0001);
+                    }
+                    WriteRawPixel(gCursorSurface, (short)column, (short)row, color);
                     ++column;
                 }
             }
         }
     }
     free(fileData);
-    SetCursor(&cursor);
     DebugLog("Cursor loader: installed CURSOR.STI normal cursor size=%ux%u", width, height);
     return 1;
 }
 
-void JA2BlitWorldToWindow(GWorldPtr world, const char *name)
+static void DrawCursorOverlay(SDL_Surface *destination)
 {
-    Rect sourceBounds;
-    Rect destinationBounds;
-    PixMapHandle sourcePixMap;
-    PixMapHandle destinationPixMap;
-    CGrafPtr savedPort;
-    GDHandle savedDevice;
-    RgnHandle savedClip;
-    RgnHandle presentationClip;
-    Boolean logBlit;
-    Boolean sourceLocked;
-    Boolean destinationLocked;
+    SDL_Rect target;
+    int mouseX;
+    int mouseY;
 
-    if (world == NULL) {
+    if (gCursorSurface == NULL || destination == NULL) {
         return;
     }
-    /* CopyBits takes rectangles in each port's local coordinate system, not
-       offsets into its PixMap. It also lets Color QuickDraw manage the
-       window's backing pixels, which must not be treated as a framebuffer. */
-    SetRect(&sourceBounds, 0, 0, JA2_SCREEN_WIDTH, JA2_SCREEN_HEIGHT);
-    SetRect(&destinationBounds, 0, 0, JA2_SCREEN_WIDTH, JA2_SCREEN_HEIGHT);
-    GetGWorld(&savedPort, &savedDevice);
-    /* SetPort alone does not select a color graphics device. Always target
-       the device that owns this application window before CopyBits. */
-    SelectWindowGWorld();
-    logBlit = !gMenuBlitLogged;
-    savedClip = NewRgn();
-    presentationClip = NewRgn();
-    if (savedClip == NULL || presentationClip == NULL) {
-        if (savedClip != NULL) DisposeRgn(savedClip);
-        if (presentationClip != NULL) DisposeRgn(presentationClip);
-        DebugLog("Renderer: cannot allocate window clipping regions for %s", name);
-        SetGWorld(savedPort, savedDevice);
+    SDL_GetMouseState(&mouseX, &mouseY);
+    target.x = mouseX;
+    target.y = mouseY;
+    target.w = gCursorWidth;
+    target.h = gCursorHeight;
+    SDL_BlitSurface(gCursorSurface, NULL, destination, &target);
+}
+
+void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
+{
+    SDL_Surface *windowSurface;
+
+    if (surface == NULL || gWindow == NULL) {
         return;
     }
-    GetClip(savedClip);
-    if (logBlit) {
-        CGrafPtr currentPort;
-        GDHandle currentDevice;
-        GetGWorld(&currentPort, &currentDevice);
-        DebugLog("Renderer: %s port=%p current=%p device=%p clip=%d,%d,%d,%d visible=%d,%d,%d,%d portRect=%d,%d,%d,%d",
-                 name, gWindow, currentPort, currentDevice, (**savedClip).rgnBBox.left,
-                 (**savedClip).rgnBBox.top, (**savedClip).rgnBBox.right,
-                 (**savedClip).rgnBBox.bottom, (**gWindow->visRgn).rgnBBox.left,
-                 (**gWindow->visRgn).rgnBBox.top, (**gWindow->visRgn).rgnBBox.right,
-                 (**gWindow->visRgn).rgnBBox.bottom, gWindow->portRect.left,
-                 gWindow->portRect.top, gWindow->portRect.right, gWindow->portRect.bottom);
-    }
-    RectRgn(presentationClip, &gWindow->portRect);
-    SetClip(presentationClip);
-    sourcePixMap = GetGWorldPixMap(world);
-    destinationPixMap = ((CWindowPtr)gWindow)->portPixMap;
-    if (sourcePixMap == NULL || destinationPixMap == NULL) {
-        DebugLog("Renderer: %s blit missing source or destination PixMap", name);
-        SetClip(savedClip);
-        DisposeRgn(presentationClip);
-        DisposeRgn(savedClip);
-        SetGWorld(savedPort, savedDevice);
+    windowSurface = SDL_GetWindowSurface(gWindow);
+    if (windowSurface == NULL) {
+        DebugLog("Renderer: %s SDL_GetWindowSurface failed: %s", name, SDL_GetError());
         return;
     }
-    sourceLocked = LockPixels(sourcePixMap);
-    destinationLocked = sourceLocked && LockPixels(destinationPixMap);
-    if (!destinationLocked) {
-        DebugLog("Renderer: %s cannot lock source=%p destination=%p pixels", name,
-                 sourcePixMap, destinationPixMap);
-        if (sourceLocked) UnlockPixels(sourcePixMap);
-        SetClip(savedClip);
-        DisposeRgn(presentationClip);
-        DisposeRgn(savedClip);
-        SetGWorld(savedPort, savedDevice);
+    if (SDL_BlitSurface(surface, NULL, windowSurface, NULL) != 0) {
+        DebugLog("Renderer: %s SDL_BlitSurface failed: %s", name, SDL_GetError());
         return;
     }
-    if (logBlit) {
-        DebugLog("Renderer: %s locked sourceBase=%p destinationBase=%p", name,
-                 GetPixBaseAddr(sourcePixMap), GetPixBaseAddr(destinationPixMap));
+    DrawCursorOverlay(windowSurface);
+    if (SDL_UpdateWindowSurface(gWindow) != 0) {
+        DebugLog("Renderer: %s SDL_UpdateWindowSurface failed: %s", name, SDL_GetError());
     }
-    CopyBits((BitMap *)&((CGrafPtr)world)->portPixMap,
-             (BitMap *)&((CGrafPtr)gWindow)->portPixMap,
-             &sourceBounds, &destinationBounds, srcCopy, NULL);
-    UnlockPixels(destinationPixMap);
-    UnlockPixels(sourcePixMap);
-    if (logBlit) {
-        gMenuBlitLogged = 1;
-        DebugLog("Renderer: copied %s 640x480 RGB555 GWorld to color window", name);
-        LogPixMap("menu source", sourcePixMap);
-        LogPixMap("window destination", destinationPixMap);
-        LogPixMapSamples("menu source", sourcePixMap);
-        LogPixMapSamples("window destination", destinationPixMap);
+}
+
+Boolean JA2PresentVideoWorld(GWorldPtr world)
+{
+    PixMapHandle pixMap;
+    unsigned char *source;
+    unsigned char *destination;
+    long sourceRowBytes;
+    int row;
+
+    if (world == NULL || gWindow == NULL) {
+        return 0;
     }
-    SetClip(savedClip);
-    DisposeRgn(presentationClip);
-    DisposeRgn(savedClip);
-    SetGWorld(savedPort, savedDevice);
+    if (gVideoSurface == NULL) {
+        gVideoSurface = SDL_CreateRGBSurfaceWithFormat(0, JA2_SCREEN_WIDTH,
+            JA2_SCREEN_HEIGHT, 16, SDL_PIXELFORMAT_RGB555);
+        if (gVideoSurface == NULL) {
+            DebugLog("Video: SDL frame surface creation failed: %s", SDL_GetError());
+            return 0;
+        }
+    }
+    pixMap = GetGWorldPixMap(world);
+    if (pixMap == NULL || !LockPixels(pixMap)) {
+        DebugLog("Video: cannot lock QuickTime frame GWorld");
+        return 0;
+    }
+    if (SDL_MUSTLOCK(gVideoSurface)) {
+        SDL_LockSurface(gVideoSurface);
+    }
+    source = (unsigned char *)GetPixBaseAddr(pixMap);
+    destination = (unsigned char *)gVideoSurface->pixels;
+    sourceRowBytes = (**pixMap).rowBytes & 0x3fff;
+    for (row = 0; row < JA2_SCREEN_HEIGHT; ++row) {
+        memcpy(destination + (long)row * gVideoSurface->pitch,
+               source + (long)row * sourceRowBytes,
+               JA2_SCREEN_WIDTH * 2);
+    }
+    if (SDL_MUSTLOCK(gVideoSurface)) {
+        SDL_UnlockSurface(gVideoSurface);
+    }
+    UnlockPixels(pixMap);
+    JA2BlitSurfaceToWindow(gVideoSurface, "intro video frame");
+    return 1;
 }
 
 void JA2BlitMenuBackground(void)
 {
-    JA2BlitWorldToWindow(gMenuWorld, "menu background");
+    JA2BlitSurfaceToWindow(gMenuSurface, "menu background");
 }
 
-void JA2LogDifficultyRenderState(const char *stage)
-{
-    CGrafPtr currentPort;
-    GDHandle currentDevice;
-    PixMapHandle cachePixMap = NULL;
-    PixMapHandle windowPixMap = NULL;
-
-    GetGWorld(&currentPort, &currentDevice);
-    if (gMenuWorld != NULL) {
-        cachePixMap = GetGWorldPixMap(gMenuWorld);
-    }
-    if (gWindow != NULL) {
-        windowPixMap = ((CWindowPtr)gWindow)->portPixMap;
-    }
-    DebugLog("Difficulty render: %s currentPort=%p device=%p window=%p cache=%p textMode=%d",
-             stage, currentPort, currentDevice, gWindow, gMenuWorld,
-             gWindow == NULL ? -1 : ((CGrafPtr)gWindow)->txMode);
-    LogPixMap("difficulty cache", cachePixMap);
-    LogPixMap("difficulty window", windowPixMap);
-    LogPixMapSamples("difficulty cache", cachePixMap);
-    LogPixMapSamples("difficulty window", windowPixMap);
-}
-
-static Boolean CopyWorld(GWorldPtr sourceWorld, GWorldPtr destinationWorld)
-{
-    Rect bounds;
-    PixMapHandle sourcePixMap;
-    PixMapHandle destinationPixMap;
-    CGrafPtr savedPort;
-    GDHandle savedDevice;
-
-    if (sourceWorld == NULL || destinationWorld == NULL) return 0;
-    SetRect(&bounds, 0, 0, JA2_SCREEN_WIDTH, JA2_SCREEN_HEIGHT);
-    sourcePixMap = GetGWorldPixMap(sourceWorld);
-    destinationPixMap = GetGWorldPixMap(destinationWorld);
-    if (sourcePixMap == NULL || destinationPixMap == NULL) return 0;
-    GetGWorld(&savedPort, &savedDevice);
-    SetGWorld(destinationWorld, NULL);
-    CopyBits((BitMap *)&((CGrafPtr)sourceWorld)->portPixMap,
-             (BitMap *)&((CGrafPtr)destinationWorld)->portPixMap,
-             &bounds, &bounds, srcCopy, NULL);
-    SetGWorld(savedPort, savedDevice);
-    if (!gCreditsFrameCopyDiagnosticsLogged) {
-        gCreditsFrameCopyDiagnosticsLogged = 1;
-        DebugLog("Credits: cache-to-frame copy complete");
-        LogPixMapSamples("credits cache", sourcePixMap);
-        LogPixMapSamples("credits frame", destinationPixMap);
-    }
-    return 1;
-}
-
-Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
+Boolean RenderIndexedBackground(SDL_Surface *destination, const char *archiveName,
+                                const char *entryName)
 {
     JA2SLFArchive *archive;
     unsigned char *fileData;
@@ -1375,20 +1105,15 @@ Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
     unsigned char control;
     unsigned char *source;
     RGBColor color;
-    PixMapHandle menuPixMap;
-    CGrafPtr savedPort;
-    GDHandle savedDevice;
 
-    GetGWorld(&savedPort, &savedDevice);
-    DebugLog("STCI loader: opening %s (saved port=%p device=%p)", archiveName,
-             savedPort, savedDevice);
+    if (destination == NULL) {
+        return 0;
+    }
     archive = JA2SLFOpen(archiveName);
     if (archive == NULL) {
         DebugLog("STCI loader: cannot open %s", archiveName);
         return 0;
     }
-    DebugLog("STCI loader: opened %s with %lu entries", archiveName,
-             JA2SLFEntryCount(archive));
     if (!JA2SLFFind(archive, entryName, &fileOffset, &fileLength)) {
         DebugLog("STCI loader: %s not found in %s", entryName, archiveName);
         JA2SLFClose(archive);
@@ -1403,9 +1128,6 @@ Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
         return 0;
     }
     JA2SLFClose(archive);
-    DebugLog("STCI loader: %s offset=%lu length=%lu", entryName,
-             fileOffset, fileLength);
-    DebugLog("STCI loader: read %lu byte %s", fileLength, entryName);
     memcpy(header, fileData, sizeof(header));
     if (memcmp(header, "STCI", 4) != 0 || !(ReadLittleEndian32(&header[16]) & 0x0008) ||
         !(ReadLittleEndian32(&header[16]) & 0x0020)) {
@@ -1427,10 +1149,6 @@ Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
         return 0;
     }
     memcpy(palette, fileData + 64, sizeof(palette));
-    DebugLog("STCI loader: %s palette[0]=%02x,%02x,%02x palette[1]=%02x,%02x,%02x palette[128]=%02x,%02x,%02x palette[255]=%02x,%02x,%02x",
-             entryName, palette[0], palette[1], palette[2], palette[3], palette[4],
-             palette[5], palette[384], palette[385], palette[386], palette[765],
-             palette[766], palette[767]);
     memcpy(object, fileData + 64 + 768, sizeof(object));
 
     dataOffset = ReadLittleEndian32(&object[0]);
@@ -1439,8 +1157,6 @@ Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
     offsetY = (short)ReadLittleEndian16(&object[10]);
     width = ReadLittleEndian16(&object[14]);
     height = ReadLittleEndian16(&object[12]);
-    DebugLog("STCI loader: %s object %ux%u at %d,%d stored=%lu",
-             entryName, width, height, offsetX, offsetY, storedSize);
     if (width == 0 || height == 0 || dataLength == 0 || dataLength > storedSize || dataOffset > storedSize ||
         dataOffset + dataLength > storedSize ||
         fileLength < 64 + 768 + 16 + storedSize) {
@@ -1459,28 +1175,7 @@ Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
     free(fileData);
 
     source = pixels + dataOffset;
-    if (!gMenuRenderDirectToWindow && !EnsureMenuWorld()) {
-        free(pixels);
-        return 0;
-    }
-    menuPixMap = GetMenuRenderPixMap();
-    if (menuPixMap == NULL || !LockPixels(menuPixMap)) {
-        DebugLog("Menu loader: unable to lock offscreen PixMap");
-        free(pixels);
-        return 0;
-    }
-    if ((**menuPixMap).pixelSize != 16) {
-        DebugLog("Menu loader: expected 16-bit destination PixMap, got depth=%d",
-                 (**menuPixMap).pixelSize);
-        UnlockPixels(menuPixMap);
-        free(pixels);
-        return 0;
-    }
-    if (gMenuRenderDirectToWindow) {
-        EraseRect(&gWindow->portRect);
-    } else {
-        EraseRect(&((GrafPtr)gMenuWorld)->portRect);
-    }
+    SDL_FillRect(destination, NULL, 0);
     DebugLog("STCI loader: cleared indexed image destination; rendering %ux%u ETRLE bytes=%lu",
              width, height, dataLength);
     for (y = 0; y < height; ++y) {
@@ -1501,7 +1196,6 @@ Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
             } else {
                 if ((unsigned long)(source - (pixels + dataOffset)) + run > dataLength) {
                     DebugLog("Truncated ETRLE literal row=%u x=%u run=%u", y, x, run);
-                    UnlockPixels(menuPixMap);
                     free(pixels);
                     return 0;
                 }
@@ -1510,7 +1204,7 @@ Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
                     color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
                     color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
                     color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
-                    WriteMenuPixel(menuPixMap, (short)(offsetX + x),
+                    WriteMenuPixel(destination, (short)(offsetX + x),
                                    (short)(offsetY + y), &color);
                     ++x;
                 }
@@ -1522,57 +1216,13 @@ Boolean RenderIndexedBackground(const char *archiveName, const char *entryName)
             ++source;
         }
     }
-    UnlockPixels(menuPixMap);
-    SetGWorld(savedPort, savedDevice);
     free(pixels);
     return 1;
 }
 
 static Boolean RenderMainMenuBackground(void)
 {
-    return RenderIndexedBackground("LoadScreens.slf", "MAINMENUBACKGROUND.STI");
-}
-
-void DrawCString(short x, short y, const char *text)
-{
-    Str255 pascalText;
-    short length = (short)strlen(text);
-
-    if (length > 255) {
-        length = 255;
-    }
-    pascalText[0] = (unsigned char)length;
-    memcpy(&pascalText[1], text, (size_t)length);
-    MoveTo(x, y);
-    DrawString(pascalText);
-}
-
-static void DrawCenteredCString(short y, const char *text, RGBColor *color)
-{
-    Str255 pascalText;
-    short length = (short)strlen(text);
-    short width;
-
-    if (length > 255) length = 255;
-    pascalText[0] = (unsigned char)length;
-    memcpy(&pascalText[1], text, (size_t)length);
-    width = StringWidth(pascalText);
-    RGBForeColor(color);
-    DrawCString((short)((JA2_SCREEN_WIDTH - width) / 2), y, text);
-}
-
-static void DrawCreditsColumnString(short y, const char *text, RGBColor *color)
-{
-    Str255 pascalText;
-    short length = (short)strlen(text);
-    short width;
-
-    if (length > 255) length = 255;
-    pascalText[0] = (unsigned char)length;
-    memcpy(&pascalText[1], text, (size_t)length);
-    width = StringWidth(pascalText);
-    RGBForeColor(color);
-    DrawCString((short)(10 + (210 - width) / 2), y, text);
+    return RenderIndexedBackground(gMenuSurface, "LoadScreens.slf", "MAINMENUBACKGROUND.STI");
 }
 
 /* The original credits use the first image in each three-frame face group. */
@@ -1589,7 +1239,6 @@ static Boolean RenderCreditFaces(void)
     const unsigned char *object;
     const unsigned char *source;
     RGBColor color;
-    Rect pixel;
 
     archive = JA2SLFOpen("Interface.slf");
     if (archive == NULL || !JA2SLFFind(archive, "CREDIT FACES.STI", &offset, &length)) {
@@ -1597,7 +1246,6 @@ static Boolean RenderCreditFaces(void)
         if (archive != NULL) JA2SLFClose(archive);
         return 0;
     }
-    DebugLog("Credits: Credit Faces.sti offset=%lu length=%lu", offset, length);
     fileData = (unsigned char *)malloc(length);
     if (fileData == NULL || !JA2SLFRead(archive, offset, fileData, length)) {
         free(fileData);
@@ -1611,7 +1259,6 @@ static Boolean RenderCreditFaces(void)
     }
     storedSize = ReadLittleEndian32(&fileData[8]);
     count = ReadLittleEndian16(&fileData[28]);
-    DebugLog("Credits: face sprite object count=%u stored=%lu", count, storedSize);
     if (count < 45 || length < 64 + 768 + (unsigned long)count * 16 + storedSize) {
         free(fileData);
         return 0;
@@ -1644,12 +1291,10 @@ static Boolean RenderCreditFaces(void)
                         color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
                         color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
                         color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
-                        RGBForeColor(&color);
-                        SetRect(&pixel, (short)(gCreditFaces[face].eyeX + offsetX + x),
-                                (short)(gCreditFaces[face].eyeY + offsetY + y),
-                                (short)(gCreditFaces[face].eyeX + offsetX + x + 1),
-                                (short)(gCreditFaces[face].eyeY + offsetY + y + 1));
-                        PaintRect(&pixel);
+                        WriteMenuPixel(gCreditsSurface,
+                                       (short)(gCreditFaces[face].eyeX + offsetX + x),
+                                       (short)(gCreditFaces[face].eyeY + offsetY + y),
+                                       &color);
                         ++x;
                     }
                 }
@@ -1667,24 +1312,15 @@ static Boolean RenderCreditFaces(void)
 
 static void DrawCreditsScreen(void)
 {
-    RGBColor white = {0xffff, 0xffff, 0xffff};
-    RGBColor red = {0xffff, 0x0000, 0x0000};
-    RGBColor black = {0, 0, 0};
     short index;
     short y;
     Boolean anyEyesClosed = 0;
 
-    if (!EnsureCreditsWorld()) return;
-    /* Compose the complete credits frame off-screen. Direct writes to a
-       mirrored window can be erased by QuickDraw update processing. */
-    gMenuRenderDirectToWindow = 0;
-    if (!RenderIndexedBackground("Interface.slf", "CREDITS.STI")) {
-        DebugLog("Credits: off-screen background render failed");
-        gMenuRenderDirectToWindow = 0;
+    if (!EnsureCreditsSurface()) return;
+    if (!RenderIndexedBackground(gCreditsSurface, "Interface.slf", "CREDITS.STI")) {
+        DebugLog("Credits: background render failed");
         return;
     }
-    DebugLog("Credits: rendered background to RGB555 frame GWorld");
-    SetGWorld(gCreditsWorld, NULL);
     for (index = 0; index < 15; ++index) {
         if (gCreditFaces[index].eyesClosedUntil != 0) {
             anyEyesClosed = 1;
@@ -1692,32 +1328,18 @@ static void DrawCreditsScreen(void)
         }
     }
     if (anyEyesClosed) RenderCreditFaces();
-    gMenuRenderDirectToWindow = 0;
-    TextFont(systemFont);
-    /* Match the original color-keyed text surface: glyphs overlay the image
-       without copying a white text-background rectangle into the window. */
-    TextMode(srcOr);
     for (index = 0; index < gCreditsCount; ++index) {
+        Boolean heading = index == 0 || index == 3 || index == 10 || index == 17 || index == 19;
         y = (short)(479 + index * 16 - gCreditsScrollOffset);
         if (y < -18 || y > 480) continue;
-        TextSize(index == 0 || index == 3 || index == 10 || index == 17 || index == 19 ? 14 : 12);
-        DrawCreditsColumnString(y, gCredits[index],
-                                (index == 0 || index == 3 || index == 10 ||
-                                 index == 17 || index == 19) ? &red : &white);
+        DrawCreditsColumnString(gCreditsSurface, y, gCredits[index],
+                                heading ? JA2_COLOR_RED : JA2_COLOR_WHITE,
+                                heading ? 14 : 12);
     }
     if (gCreditsHoverFace >= 0) {
-        TextSize(12);
-        DrawCenteredCString(420, gCreditFaces[gCreditsHoverFace].name, &white);
-        DrawCenteredCString(435, gCreditFaces[gCreditsHoverFace].title, &white);
-        DrawCenteredCString(450, gCreditFaces[gCreditsHoverFace].aside, &white);
-    }
-    /* Keep the color device state neutral after the red/white text overlay. */
-    RGBForeColor(&black);
-    RGBBackColor(&white);
-    if (!gCreditsTextDiagnosticsLogged) {
-        gCreditsTextDiagnosticsLogged = 1;
-        DebugLog("Credits: window samples after direct text overlay");
-        LogPixMapSamples("credits window after text", ((CWindowPtr)gWindow)->portPixMap);
+        DrawCenteredCString(gCreditsSurface, 420, gCreditFaces[gCreditsHoverFace].name, JA2_COLOR_WHITE);
+        DrawCenteredCString(gCreditsSurface, 435, gCreditFaces[gCreditsHoverFace].title, JA2_COLOR_WHITE);
+        DrawCenteredCString(gCreditsSurface, 450, gCreditFaces[gCreditsHoverFace].aside, JA2_COLOR_WHITE);
     }
     if (gCreditsScrollOffset == 0 ||
         gCreditsScrollOffset >= gCreditsLastLoggedScroll + 60) {
@@ -1725,27 +1347,22 @@ static void DrawCreditsScreen(void)
         DebugLog("Credits: rendered scroll=%d hover=%d", gCreditsScrollOffset,
                  gCreditsHoverFace);
     }
-    JA2BlitWorldToWindow(gCreditsWorld, "credits frame");
+    JA2BlitSurfaceToWindow(gCreditsSurface, "credits frame");
 }
 
 static void EnterCreditsScreen(void)
 {
     unsigned short face;
     gMenuScreen = MENU_SCREEN_CREDITS;
-    gCreditsStartTicks = TickCount();
+    gCreditsLastScrollTicks = SDL_GetTicks();
     gCreditsScrollOffset = 0;
-    gCreditsScrollPhase = 0;
     gCreditsHoverFace = -1;
-    gCreditsBackgroundLoaded = 0;
     gCreditsLastLoggedScroll = -1;
-    gCreditsTextDiagnosticsLogged = 0;
-    gCreditsFrameCopyDiagnosticsLogged = 0;
-    gMenuBlitLogged = 0;
     DebugLog("Credits: entering screen, %d lines and %d face regions",
              gCreditsCount, 15);
     for (face = 0; face < 15; ++face) {
-        gCreditFaces[face].lastBlink = TickCount() +
-            (unsigned long)(rand() % ((gCreditFaces[face].blinkFrequency * 120L) / 1000L));
+        gCreditFaces[face].lastBlink = SDL_GetTicks() +
+            (unsigned long)(rand() % gCreditFaces[face].blinkFrequency);
         gCreditFaces[face].eyesClosedUntil = 0;
     }
     DrawCreditsScreen();
@@ -1753,84 +1370,53 @@ static void EnterCreditsScreen(void)
 
 static void PollCredits(void)
 {
-    Point point;
+    int mouseX;
+    int mouseY;
     short face;
     unsigned short index;
-    unsigned long now;
+    Uint32 now;
+    Boolean needsRedraw = 0;
 
     if (gMenuScreen != MENU_SCREEN_CREDITS) return;
-    now = TickCount();
+    now = SDL_GetTicks();
     for (index = 0; index < 15; ++index) {
         if (gCreditFaces[index].eyesClosedUntil != 0 &&
             now >= gCreditFaces[index].eyesClosedUntil) {
             gCreditFaces[index].eyesClosedUntil = 0;
-            DebugLog("Credits: face %d eyes open", index);
+            needsRedraw = 1;
         }
         if (gCreditFaces[index].eyesClosedUntil == 0 &&
             now >= gCreditFaces[index].lastBlink) {
-            gCreditFaces[index].lastBlink = now +
-                (unsigned long)((gCreditFaces[index].blinkFrequency * 60L) / 1000L);
-            gCreditFaces[index].eyesClosedUntil = now + 9 + (unsigned long)(rand() % 10);
-            DebugLog("Credits: face %d blink until tick %lu", index,
-                     gCreditFaces[index].eyesClosedUntil);
+            gCreditFaces[index].lastBlink = now + gCreditFaces[index].blinkFrequency;
+            gCreditFaces[index].eyesClosedUntil = now + 150 + (unsigned long)(rand() % 160);
+            needsRedraw = 1;
         }
     }
-    /* The original moves one pixel every 25 ms. At 60 Hz, two pixels every
-       three ticks preserves that 40-pixel-per-second rate without fractions. */
-    if (TickCount() != gCreditsStartTicks) {
-        gCreditsStartTicks = now;
-        if (++gCreditsScrollPhase != 3) return;
-        gCreditsScrollPhase = 0;
-        gCreditsScrollOffset += 2;
+    /* The original moves 40 pixels per second. */
+    if (now - gCreditsLastScrollTicks >= 25) {
+        gCreditsLastScrollTicks = now;
+        gCreditsScrollOffset += 1;
+        needsRedraw = 1;
         if (gCreditsScrollOffset > (short)(gCreditsCount * 16 + 480)) {
             DebugLog("Credits: reached end, returning to main menu");
             RestoreMainMenu();
             return;
         }
-        DrawCreditsScreen();
     }
-    GetMouse(&point);
+    SDL_GetMouseState(&mouseX, &mouseY);
     face = -1;
     for (face = 0; face < 15; ++face) {
-        if (point.h >= gCreditFaces[face].x && point.h < gCreditFaces[face].x + gCreditFaces[face].width &&
-            point.v >= gCreditFaces[face].y && point.v < gCreditFaces[face].y + gCreditFaces[face].height) break;
+        if (mouseX >= gCreditFaces[face].x && mouseX < gCreditFaces[face].x + gCreditFaces[face].width &&
+            mouseY >= gCreditFaces[face].y && mouseY < gCreditFaces[face].y + gCreditFaces[face].height) break;
     }
     if (face == 15) face = -1;
     if (face != gCreditsHoverFace) {
         gCreditsHoverFace = face;
-        DebugLog("Credits: hover face=%d", face);
+        needsRedraw = 1;
+    }
+    if (needsRedraw) {
         DrawCreditsScreen();
     }
-}
-
-static void DrawDiagnostics(void)
-{
-    Rect bounds;
-    char *line;
-    char *next;
-    short y = 16;
-
-    gDrawingDiagnostics = 1;
-    SetPort(gDiagnosticsWindow);
-    bounds = gDiagnosticsWindow->portRect;
-    EraseRect(&bounds);
-    TextFont(systemFont);
-    TextSize(9);
-    line = gDiagnosticsText;
-    while (*line != 0 && y < bounds.bottom - 10) {
-        next = strchr(line, '\r');
-        if (next != NULL) {
-            *next = 0;
-        }
-        DrawCString(8, y, line);
-        if (next == NULL) {
-            break;
-        }
-        *next = '\r';
-        line = next + 1;
-        y += 12;
-    }
-    gDrawingDiagnostics = 0;
 }
 
 static void DrawMainMenu(void)
@@ -1838,27 +1424,21 @@ static void DrawMainMenu(void)
     static const char *labels[] = {
         "Neues Spiel", "Spiel laden", "Einstellungen", "Credits", "Beenden"
     };
-    Rect button;
-    RGBColor border = { 0xd900, 0x9b00, 0x4500 };
-    RGBColor text = { 0xffff, 0xffff, 0xffff };
     short index;
 
-    SetPort(gWindow);
-    TextFont(systemFont);
-    TextSize(13);
     for (index = 0; index < 5; ++index) {
-        button.left = 205;
-        button.top = (short)(267 + index * 36);
-        button.right = 435;
-        button.bottom = (short)(302 + index * 36);
-        RGBForeColor(&border);
+        short top = (short)(267 + index * 36);
+        short bottom = (short)(302 + index * 36);
+
         if (index == gMenuButton) {
-            PaintRoundRect(&button, 8, 8);
-            RGBForeColor(&text);
+            FillRectRGB555(gMenuSurface, 205, top, 435, bottom, JA2_COLOR_ACCENT);
+            DrawCString(gMenuSurface, (short)(205 + 18), (short)(top + 18), labels[index],
+                        JA2_COLOR_WHITE);
         } else {
-            FrameRoundRect(&button, 8, 8);
+            FrameRectRGB555(gMenuSurface, 205, top, 435, bottom, JA2_COLOR_ACCENT);
+            DrawCString(gMenuSurface, (short)(205 + 18), (short)(top + 18), labels[index],
+                        JA2_COLOR_WHITE);
         }
-        DrawCString((short)(button.left + 18), (short)(button.top + 18), labels[index]);
     }
 }
 
@@ -1873,10 +1453,6 @@ static void DrawMenuActionScreen(void)
         "Die Spieleinstellungen werden hier angezeigt.",
         "Die Credits werden hier angezeigt."
     };
-    Rect bounds;
-    RGBColor background = { 0x1200, 0x1600, 0x2200 };
-    RGBColor accent = { 0xd900, 0x9b00, 0x4500 };
-    RGBColor white = { 0xffff, 0xffff, 0xffff };
     short action;
     char status[96];
 
@@ -1884,52 +1460,64 @@ static void DrawMenuActionScreen(void)
         JA2DrawDifficultyScreen();
         return;
     }
+    if (!EnsureMenuSurface()) return;
     action = (short)(gMenuScreen - MENU_SCREEN_NEW_GAME);
     if (gMenuScreen > MENU_SCREEN_DIFFICULTY) {
         --action;
     }
 
-    HideCursor();
-    SetGWorld((CGrafPtr)gWindow, GetMainDevice());
-    bounds = gWindow->portRect;
-    RGBForeColor(&background);
-    PaintRect(&bounds);
-    TextFont(systemFont);
-    TextSize(24);
-    RGBForeColor(&accent);
-    MoveTo(60, 110);
-    DrawCString(60, 110, titles[action]);
-    TextSize(13);
-    RGBForeColor(&white);
+    SDL_FillRect(gMenuSurface, NULL, JA2_RGB555(18, 22, 34));
+    JA2DrawText(gMenuSurface, 60, 110, titles[action], JA2_COLOR_ACCENT, 24);
     if (gMenuScreen == MENU_SCREEN_NEW_GAME && gNewGameState == NEW_GAME_READY) {
-        DrawCString(60, 160, "Kampagne initialisiert. Laptop-Bildschirm folgt.");
+        DrawCString(gMenuSurface, 60, 160, "Kampagne initialisiert. Laptop-Bildschirm folgt.",
+                    JA2_COLOR_WHITE);
         sprintf(status, "Startkapital: %ld   Eroeffnungs-E-Mails: %d",
                 gNewGameStartingCash, gNewGameOpeningEmails);
-        DrawCString(60, 190, status);
+        DrawCString(gMenuSurface, 60, 190, status, JA2_COLOR_WHITE);
         sprintf(status, "Startsektor: A9 Omerta (%d,%d,0)",
                 gNewGameSectorX, gNewGameSectorY);
-        DrawCString(60, 212, status);
-        DrawCString(60, 250, "ESC: Zurueck zum Hauptmenue");
+        DrawCString(gMenuSurface, 60, 212, status, JA2_COLOR_WHITE);
+        DrawCString(gMenuSurface, 60, 250, "ESC: Zurueck zum Hauptmenue", JA2_COLOR_WHITE);
     } else {
-        DrawCString(60, 160, details[action]);
-        DrawCString(60, 210, "ESC: Zurueck zum Hauptmenue");
+        DrawCString(gMenuSurface, 60, 160, details[action], JA2_COLOR_WHITE);
+        DrawCString(gMenuSurface, 60, 210, "ESC: Zurueck zum Hauptmenue", JA2_COLOR_WHITE);
     }
-    ShowCursor();
+    JA2BlitMenuBackground();
 }
 
-static void DrawJA2Shell(void);
-static void EnterMainMenu(void);
+static void DrawJA2Shell(void)
+{
+    char dataStatus[48];
+    char entryStatus[48];
+    char assetStatus[64];
+
+    if (!EnsureMenuSurface()) return;
+    SDL_FillRect(gMenuSurface, NULL, JA2_RGB555(18, 22, 34));
+    FillRectRGB555(gMenuSurface, 28, 28, JA2_SCREEN_WIDTH - 28, JA2_SCREEN_HEIGHT - 28,
+                   JA2_RGB555(38, 48, 72));
+
+    JA2DrawText(gMenuSurface, 58, 92, "JAGGED ALLIANCE 2", JA2_COLOR_ACCENT, 24);
+    DrawCString(gMenuSurface, 60, 124, "PowerPC / System 9 platform shell (SDL2)", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 60, 154, "SDL2 rendering backend and Macintosh event loop online.",
+                JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 60, 176, "Press Command-Q or close the window to quit.",
+                JA2_COLOR_WHITE);
+
+    sprintf(dataStatus, "JA2 data archives: %d/22", CountDataLibraries());
+    DrawCString(gMenuSurface, 60, 214, dataStatus, JA2_COLOR_WHITE);
+    sprintf(entryStatus, "Menu background loaded: %d", gMenuBackgroundLoaded);
+    DrawCString(gMenuSurface, 60, 234, entryStatus, JA2_COLOR_WHITE);
+    strcpy(assetStatus, gMenuBackgroundLoaded ? "Main menu graphic found" : "Main menu graphic missing");
+    DrawCString(gMenuSurface, 60, 254, assetStatus, JA2_COLOR_WHITE);
+    JA2BlitMenuBackground();
+}
 
 static void RenderMainMenuDirectly(void)
 {
-    unsigned long startTicks = TickCount();
+    Uint32 startTicks = SDL_GetTicks();
 
+    if (!EnsureMenuSurface()) return;
     DebugLog("Main menu: composing RGB555 background and buttons");
-    HideCursor();
-    /* Always compose indexed artwork in the native 16-bit cache, as the
-       original renderer does. This keeps mirrored LCD/VGA presentation out of
-       the asset decoder's raw pixel path. */
-    gMenuRenderDirectToWindow = 0;
     gMenuBackgroundLoaded = RenderMainMenuBackground();
     if (gMenuBackgroundLoaded) {
         RenderMenuLogo();
@@ -1938,30 +1526,20 @@ static void RenderMainMenuDirectly(void)
             DrawMainMenu();
         }
         JA2BlitMenuBackground();
-        DebugLog("Main menu: post-blit RGB555 samples");
-        LogPixMapSamples("main menu cache", GetGWorldPixMap(gMenuWorld));
-        LogPixMapSamples("main menu window", ((CWindowPtr)gWindow)->portPixMap);
     } else {
         gMenuButtonsLoaded = 0;
-        gMenuRenderDirectToWindow = 1;
         DrawJA2Shell();
-        gMenuRenderDirectToWindow = 0;
     }
-    ShowCursor();
-    DebugLog("Main menu: composition complete loaded=%d buttons=%d ticks=%lu",
+    DebugLog("Main menu: composition complete loaded=%d buttons=%d ms=%lu",
              gMenuBackgroundLoaded, gMenuButtonsLoaded,
-             (unsigned long)(TickCount() - startTicks));
+             (unsigned long)(SDL_GetTicks() - startTicks));
 }
 
 static void EnterMainMenu(void)
 {
     gStartupActive = 0;
-    gMenuBlitLogged = 0;
     DebugLog("Main menu: rebuilding archive-backed composition");
-    /* The splash was drawn over the cached world; reload the original
-       background before restoring the menu logo and title graphics. */
     RenderMainMenuDirectly();
-    gMainMenuNeedsRender = 0;
     JA2MenuMusicStart();
     DebugLog("Startup: entered main menu");
 }
@@ -1969,44 +1547,29 @@ static void EnterMainMenu(void)
 void RestoreMainMenu(void)
 {
     DebugLog("Main menu: restoring from screen %d", gMenuScreen);
-    if (gMenuScreen == MENU_SCREEN_CREDITS && gCreditsWorld != NULL) {
-        DisposeGWorld(gCreditsWorld);
-        gCreditsWorld = NULL;
-    }
     gMenuScreen = MENU_SCREEN_MAIN;
     gActionScreenNeedsRender = 0;
     gMenuButton = -1;
     gMenuHoverButton = -1;
-    /* The existing cache contains the outgoing screen. Prevent hover/button
-       redraws from painting over a cleared window before the main menu cache
-       has been rebuilt and presented. */
     gMenuBackgroundLoaded = 0;
     gMenuButtonsLoaded = 0;
-    /* Rebuild before invalidating the window. Otherwise the update event
-       briefly draws DrawJA2Shell(), which is only an asset-diagnostic fallback
-       and must not appear during a normal screen transition. */
-    /* A pending update event may still finalize after this mouse event and
-       clear the window. Ask the post-EndUpdate path to present the completed
-       cache once more so the rebuilt menu cannot end on a white window. */
-    gMainMenuNeedsRender = 1;
     RenderMainMenuDirectly();
-    SetPort(gWindow);
 }
 
 static void PollStartup(void)
 {
-    if (gStartupActive && TickCount() - gStartupStartTicks >= 60 * 4) {
+    if (gStartupActive && SDL_GetTicks() - gStartupStartTicks >= 4000) {
         EnterMainMenu();
     }
 }
 
-static short GetMainMenuButtonAt(Point point)
+static short GetMainMenuButtonAt(int localX, int localY)
 {
     short index;
 
     for (index = 0; index < 5; ++index) {
-        if (point.h >= 180 && point.h < 460 &&
-            point.v >= 277 + index * 37 && point.v < 305 + index * 37) {
+        if (localX >= 180 && localX < 460 &&
+            localY >= 277 + index * 37 && localY < 305 + index * 37) {
             return index;
         }
     }
@@ -2015,7 +1578,8 @@ static short GetMainMenuButtonAt(Point point)
 
 static void UpdateMainMenuHover(void)
 {
-    Point point;
+    int mouseX;
+    int mouseY;
     Boolean rendered;
     short previousButton;
     short hoverButton;
@@ -2023,14 +1587,11 @@ static void UpdateMainMenuHover(void)
     if (gStartupActive || gMenuScreen != MENU_SCREEN_MAIN || !gMenuBackgroundLoaded) {
         return;
     }
-    SetPort(gWindow);
-    GetMouse(&point);
-    hoverButton = GetMainMenuButtonAt(point);
+    SDL_GetMouseState(&mouseX, &mouseY);
+    hoverButton = GetMainMenuButtonAt(mouseX, mouseY);
     if (hoverButton != gMenuHoverButton) {
         previousButton = gMenuHoverButton;
         gMenuHoverButton = hoverButton;
-        HideCursor();
-        gMenuRenderDirectToWindow = 1;
         if (previousButton < 0) {
             rendered = RenderMenuButtonFrames(hoverButton, hoverButton, hoverButton);
         } else if (hoverButton < 0) {
@@ -2043,295 +1604,145 @@ static void UpdateMainMenuHover(void)
         if (!rendered) {
             RenderMainMenuDirectly();
         }
-        gMenuRenderDirectToWindow = 0;
-        ShowCursor();
+        JA2BlitMenuBackground();
     }
 }
 
-static void HandleMainMenuClick(Point point)
+static void HandleMainMenuClick(int localX, int localY)
 {
-    short index = GetMainMenuButtonAt(point);
+    short index = GetMainMenuButtonAt(localX, localY);
 
     if (index >= 0) {
-            gMenuButton = index;
-            DebugLog("German main menu: click at %d,%d selected button %d",
-                     point.h, point.v, index);
-            switch (index) {
-                case 0:
-                    DebugLog("German main menu: new game selected");
-                    gMenuScreen = MENU_SCREEN_DIFFICULTY;
-                    DebugLog("Difficulty: entering GameInitOptionsScreen PPC implementation");
-                    break;
-                case 1:
-                    gMenuScreen = MENU_SCREEN_LOAD_GAME;
-                    DebugLog("German main menu: load game selected");
-                    break;
-                case 2:
-                    gMenuScreen = MENU_SCREEN_OPTIONS;
-                    DebugLog("German main menu: preferences selected");
-                    break;
-                case 3:
-                    DebugLog("German main menu: credits selected");
-                    EnterCreditsScreen();
-                    break;
-                case 4:
-                    DebugLog("German main menu: quit selected");
-                    gRunning = 0;
-                    break;
-            }
-            if (gMenuScreen != MENU_SCREEN_MAIN && gMenuScreen != MENU_SCREEN_CREDITS) {
-                gActionScreenNeedsRender = 1;
-                if (gMenuScreen == MENU_SCREEN_DIFFICULTY) {
-                    JA2DrawDifficultyScreen();
-                    gActionScreenNeedsRender = 0;
-                } else {
-                    DrawMenuActionScreen();
-                }
-            }
-            return;
+        gMenuButton = index;
+        DebugLog("German main menu: click at %d,%d selected button %d",
+                 localX, localY, index);
+        switch (index) {
+            case 0:
+                DebugLog("German main menu: new game selected");
+                gMenuScreen = MENU_SCREEN_DIFFICULTY;
+                DebugLog("Difficulty: entering GameInitOptionsScreen PPC implementation");
+                break;
+            case 1:
+                gMenuScreen = MENU_SCREEN_LOAD_GAME;
+                DebugLog("German main menu: load game selected");
+                break;
+            case 2:
+                gMenuScreen = MENU_SCREEN_OPTIONS;
+                DebugLog("German main menu: preferences selected");
+                break;
+            case 3:
+                DebugLog("German main menu: credits selected");
+                EnterCreditsScreen();
+                break;
+            case 4:
+                DebugLog("German main menu: quit selected");
+                gRunning = 0;
+                break;
+        }
+        if (gMenuScreen != MENU_SCREEN_MAIN && gMenuScreen != MENU_SCREEN_CREDITS) {
+            gActionScreenNeedsRender = 1;
+        }
     }
 }
 
-static void GetWorkingDirectoryText(char *buffer, size_t bufferSize)
+static void HandleJA2Event(const SDL_Event *event)
 {
-    Str255 volumeName;
-    short volumeReference;
-    long directoryID;
-    unsigned short length;
+    switch (event->type) {
+    case SDL_QUIT:
+        DebugLog("Input: window close requested");
+        gRunning = 0;
+        break;
+    case SDL_KEYDOWN: {
+        SDL_Keycode key = event->key.keysym.sym;
+        Uint16 mods = event->key.keysym.mod;
 
-    if (HGetVol(volumeName, &volumeReference, &directoryID) != noErr) {
-        strcpy(buffer, "(unavailable)");
-        return;
-    }
-    length = volumeName[0];
-    if ((size_t)length + 32 >= bufferSize) {
-        length = (unsigned short)(bufferSize - 33);
-    }
-    memcpy(buffer, &volumeName[1], length);
-    buffer[length] = 0;
-    sprintf(&buffer[length], ": (directory ID %ld)", directoryID);
-}
-
-static void DrawJA2Shell(void)
-{
-    Rect bounds;
-    RGBColor background = { 0x1200, 0x1600, 0x2200 };
-    RGBColor panel = { 0x2600, 0x3000, 0x4800 };
-    RGBColor accent = { 0xd900, 0x9b00, 0x4500 };
-    RGBColor white = { 0xffff, 0xffff, 0xffff };
-    RGBColor black = { 0x0000, 0x0000, 0x0000 };
-    char dataStatus[48];
-    char entryStatus[48];
-    char assetStatus[64];
-    char workingDirectory[256];
-    char dataPath[320];
-
-    SetPort(gWindow);
-    bounds = gWindow->portRect;
-
-    RGBForeColor(&background);
-    PaintRect(&bounds);
-
-    bounds.left += 28;
-    bounds.top += 28;
-    bounds.right -= 28;
-    bounds.bottom -= 28;
-    RGBForeColor(&panel);
-    PaintRoundRect(&bounds, 14, 14);
-
-    TextFont(systemFont);
-    TextSize(24);
-    RGBForeColor(&accent);
-    MoveTo(58, 92);
-    DrawString((ConstStr255Param) "\pJAGGED ALLIANCE 2");
-
-    TextSize(12);
-    RGBForeColor(&white);
-    MoveTo(60, 124);
-    DrawString((ConstStr255Param) PLATFORM_TEXT);
-    MoveTo(60, 154);
-    DrawString((ConstStr255Param) EVENT_TEXT);
-    MoveTo(60, 176);
-    DrawString((ConstStr255Param) QUIT_TEXT);
-
-    sprintf(dataStatus, ARCHIVE_FORMAT, CountDataLibraries());
-    DrawCString(60, 214, dataStatus);
-    sprintf(entryStatus, ENTRY_FORMAT, CountDataArchiveEntries());
-    DrawCString(60, 234, entryStatus);
-    if (gMenuBackgroundLoaded) {
-        strcpy(assetStatus, MENU_FOUND_TEXT);
-    } else {
-        strcpy(assetStatus, MENU_MISSING_TEXT);
-    }
-    DrawCString(60, 254, assetStatus);
-
-    GetWorkingDirectoryText(workingDirectory, sizeof(workingDirectory));
-    strcpy(dataPath, DATA_PATH_FORMAT);
-    TextSize(9);
-    DrawCString(60, 278, WORKING_DIRECTORY_TEXT);
-    DrawCString(60, 291, workingDirectory);
-    DrawCString(60, 306, dataPath);
-    DrawCString(60, 321, DATA_LOCATION_TEXT);
-    DrawCString(60, 336, INI_LOCATION_TEXT);
-    TextSize(12);
-
-    RGBForeColor(&black);
-}
-
-static void HandleJA2Event(const EventRecord *event)
-{
-    char key;
-    WindowPtr clicked;
-    short part;
-    Boolean redrawMenuAfterUpdate;
-
-    if (event->what == keyDown || event->what == autoKey) {
-        key = (char)(event->message & charCodeMask);
-        DebugLog("Input: %s key=%d char='%c' modifiers=%u screen=%d startup=%d intro=%d",
-                 event->what == autoKey ? "autoKey" : "keyDown",
-                 (unsigned char)key,
-                 (key >= 32 && key < 127) ? key : '?',
-                 event->modifiers, gMenuScreen, gStartupActive,
-                 gMenuScreen == MENU_SCREEN_INTRO);
-        if (gMenuScreen == MENU_SCREEN_INTRO &&
-            (key == 27 || key == ' ')) {
+        DebugLog("Input: keyDown key=%d screen=%d startup=%d",
+                 (int)key, gMenuScreen, gStartupActive);
+        if (gMenuScreen == MENU_SCREEN_INTRO && (key == SDLK_ESCAPE || key == SDLK_SPACE)) {
             JA2PPCIntroSkip();
-        } else if (gMenuScreen == MENU_SCREEN_DIFFICULTY && key == 13) {
-            Point point = { 200, 430 };
-            JA2HandleDifficultyClick(point);
-        } else if (gMenuScreen != MENU_SCREEN_MAIN && (key == 27 || key == 'b' || key == 'B')) {
+        } else if (gMenuScreen == MENU_SCREEN_DIFFICULTY && key == SDLK_RETURN) {
+            JA2HandleDifficultyClick(200, 430);
+        } else if (gMenuScreen != MENU_SCREEN_MAIN &&
+                   (key == SDLK_ESCAPE || key == SDLK_b)) {
             if (gMenuScreen == MENU_SCREEN_DIFFICULTY) {
                 JA2ResetDifficultyScreen();
             }
             RestoreMainMenu();
-        } else if (key == 'q' || key == 'Q' || (event->modifiers & cmdKey)) {
+        } else if (key == SDLK_q || (mods & KMOD_GUI) != 0) {
             gRunning = 0;
         }
-    } else if (event->what == mouseDown) {
-        part = FindWindow(event->where, &clicked);
-        DebugLog("Input: mouseDown global=%d,%d part=%d window=%p screen=%d startup=%d",
-                 event->where.h, event->where.v, part, clicked, gMenuScreen,
-                 gStartupActive);
-        if (part == inDrag) {
-            DebugLog("Input: window drag requested");
-            DragWindow(clicked, event->where, &qd.screenBits.bounds);
-        } else if (part == inGoAway && TrackGoAway(clicked, event->where)) {
-            DebugLog("Input: close box accepted window=%p", clicked);
-            if (clicked == gDiagnosticsWindow) {
-                HideWindow(gDiagnosticsWindow);
-            } else {
-                gRunning = 0;
-            }
-        } else if (clicked == gWindow && part == inContent) {
-            Point point = event->where;
-            SetPort(gWindow);
-            GlobalToLocal(&point);
-            DebugLog("Input: content click local=%d,%d screen=%d startup=%d",
-                     point.h, point.v, gMenuScreen, gStartupActive);
-            if (!gStartupActive && gMenuScreen == MENU_SCREEN_INTRO) {
-                DebugLog("Input: intro click requests skip");
-                JA2PPCIntroSkip();
-            } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_MAIN) {
-                HandleMainMenuClick(point);
-            } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_DIFFICULTY) {
-                JA2HandleDifficultyClick(point);
-            } else {
-                DebugLog("Input: content click ignored screen=%d startup=%d",
-                         gMenuScreen, gStartupActive);
-            }
+        break;
+    }
+    case SDL_MOUSEBUTTONDOWN: {
+        int localX = event->button.x;
+        int localY = event->button.y;
+
+        DebugLog("Input: content click local=%d,%d screen=%d startup=%d",
+                 localX, localY, gMenuScreen, gStartupActive);
+        if (!gStartupActive && gMenuScreen == MENU_SCREEN_INTRO) {
+            JA2PPCIntroSkip();
+        } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_MAIN) {
+            HandleMainMenuClick(localX, localY);
+        } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_DIFFICULTY) {
+            JA2HandleDifficultyClick((short)localX, (short)localY);
         }
-    } else if (event->what == updateEvt) {
-        WindowPtr updatedWindow = (WindowPtr)event->message;
-        redrawMenuAfterUpdate = 0;
-        BeginUpdate(updatedWindow);
-        if (updatedWindow == gDiagnosticsWindow) {
-            DrawDiagnostics();
-            EndUpdate(updatedWindow);
-            return;
+        break;
+    }
+    case SDL_WINDOWEVENT:
+        if (event->window.event == SDL_WINDOWEVENT_EXPOSED) {
+            PresentCurrentScreen();
         }
-        if (gStartupActive ||
-            (gMenuBackgroundLoaded && gMenuScreen == MENU_SCREEN_MAIN)) {
-            /* The window manager may deliver more than one update after a
-               screen transition. Restore the cached menu after every such
-               update, not only during the startup splash. */
-            redrawMenuAfterUpdate = 1;
-        } else if (gMenuScreen == MENU_SCREEN_CREDITS) {
-            DrawCreditsScreen();
-        } else if (gMenuScreen == MENU_SCREEN_INTRO) {
-            JA2PPCIntroUpdate();
-        } else if (gMenuScreen != MENU_SCREEN_MAIN) {
-            if (gActionScreenNeedsRender) {
-                gActionScreenNeedsRender = 0;
-                DrawMenuActionScreen();
-            }
-        } else {
-            DrawJA2Shell();
-        }
-        EndUpdate(updatedWindow);
-        if (updatedWindow == gWindow && gMenuScreen == MENU_SCREEN_CREDITS &&
-            gCreditsWorld != NULL) {
-            /* EndUpdate can clear the window's update region after a full
-               CopyBits. Restore the complete cached Credits frame afterward. */
-            JA2BlitWorldToWindow(gCreditsWorld, "credits frame after update");
-        }
-        if (updatedWindow == gWindow && redrawMenuAfterUpdate) {
-            /* Copy after EndUpdate so QuickDraw cannot clear the new frame as
-               part of finalizing the invalidated content region. */
-            JA2BlitMenuBackground();
-        }
-        if (updatedWindow == gWindow && gMainMenuNeedsRender) {
-            gMainMenuNeedsRender = 0;
-            RenderMainMenuDirectly();
-        }
-        if (updatedWindow == gWindow && gMenuBackgroundLoaded &&
-            !gMenuButtonsLoaded && !gStartupActive) {
-            /* The update region clips drawing. Restore controls after the
-               region is ended so a moved window redraws every button. */
-            DrawMainMenu();
-        }
+        break;
+    default:
+        break;
     }
 }
 
-int main(void)
+static void PresentCurrentScreen(void)
 {
-    EventRecord event;
-    WindowPtr window;
-    OSErr depthError;
-    Rect bounds = { 40, 40, 40 + JA2_SCREEN_HEIGHT, 40 + JA2_SCREEN_WIDTH };
-    Rect diagnosticsBounds = { 80, 80, 320, 560 };
+    switch (gMenuScreen) {
+    case MENU_SCREEN_CREDITS:
+        if (gCreditsSurface != NULL) {
+            JA2BlitSurfaceToWindow(gCreditsSurface, "credits frame");
+        }
+        break;
+    case MENU_SCREEN_INTRO:
+        /* The cinematics backend owns its own per-frame presentation. */
+        break;
+    default:
+        if (gMenuSurface != NULL) {
+            JA2BlitSurfaceToWindow(gMenuSurface, "menu frame");
+        }
+        break;
+    }
+}
 
-    InitGraf(&qd.thePort);
-    MaxApplZone();
-    DebugLog("Memory: expanded application zone free=%ld bytes", (long)FreeMem());
-    InitFonts();
-    InitWindows();
-    InitMenus();
-    InitCursor();
+static void UpdateCursorPresentIfMoved(void)
+{
+    int mouseX;
+    int mouseY;
 
-    depthError = SetDepth(GetMainDevice(), 16, 0, 0);
-    DebugLog("Display depth request: main device 16-bit result=%d", depthError);
-    SetAllDisplayDepths();
+    if (gMenuScreen == MENU_SCREEN_INTRO) {
+        return;
+    }
+    SDL_GetMouseState(&mouseX, &mouseY);
+    if (mouseX != gLastMouseX || mouseY != gLastMouseY) {
+        gLastMouseX = mouseX;
+        gLastMouseY = mouseY;
+        PresentCurrentScreen();
+    }
+}
 
-    gWindow = NewCWindow(NULL, &bounds, (ConstStr255Param) WINDOW_TITLE, 1,
-                         documentProc, (WindowPtr)-1, 1, 0);
-    if (gWindow == NULL) {
+int main(int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;
+
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
         return 1;
     }
-
-#if defined(JA2_DEBUG_BUILD)
-    gDiagnosticsWindow = NewCWindow(NULL, &diagnosticsBounds,
-                                    (ConstStr255Param) "\pJA2 Debug", 1,
-                                    documentProc, (WindowPtr)-1, 1, 0);
-#endif
-    DebugLog("JA2 PPC startup");
+    DebugLog("JA2 PPC startup (SDL2 rendering backend)");
     JA2MenuMusicSetLogger(DebugLog);
-    DebugLog("Diagnostics build: %s",
-#if defined(JA2_DEBUG_BUILD)
-             "enabled"
-#else
-             "disabled"
-#endif
-    );
     DebugLog("Language: %s",
 #if defined(JA2_LANGUAGE_GERMAN)
              "german"
@@ -2340,16 +1751,29 @@ int main(void)
 #endif
     );
 
-    ShowWindow(gWindow);
-    SelectWindow(gWindow);
-    if (gDiagnosticsWindow != NULL) {
-        ShowWindow(gDiagnosticsWindow);
-        DrawDiagnostics();
+    gWindow = SDL_CreateWindow(WINDOW_TITLE, SDL_WINDOWPOS_UNDEFINED,
+                               SDL_WINDOWPOS_UNDEFINED, JA2_SCREEN_WIDTH,
+                               JA2_SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+    if (gWindow == NULL) {
+        DebugLog("Startup: SDL_CreateWindow failed: %s", SDL_GetError());
+        SDL_Quit();
+        return 1;
     }
-    DebugLog("Startup: creating render world; attempting logo screen before menu load");
-    if (EnsureMenuWorld() && RenderStartupSplash()) {
+    {
+        SDL_Surface *windowSurface = SDL_GetWindowSurface(gWindow);
+        if (windowSurface != NULL) {
+            DebugLog("Startup: window surface format=%s",
+                     SDL_GetPixelFormatName(windowSurface->format->format));
+        }
+    }
+    SDL_ShowCursor(SDL_DISABLE);
+    JA2TextInit();
+    JA2InstallNormalCursor();
+
+    DebugLog("Startup: attempting logo screen before menu load");
+    if (EnsureMenuSurface() && RenderStartupSplash()) {
         gStartupActive = 1;
-        gStartupStartTicks = TickCount();
+        gStartupStartTicks = SDL_GetTicks();
         JA2BlitMenuBackground();
         DebugLog("Startup: logo screen displayed for 4 seconds");
     } else {
@@ -2358,28 +1782,45 @@ int main(void)
     }
 
     while (gRunning) {
+        SDL_Event event;
+
+        while (SDL_PollEvent(&event)) {
+            HandleJA2Event(&event);
+        }
         PollStartup();
         JA2MenuMusicPoll();
         UpdateMainMenuHover();
         PollCredits();
         JA2PPCIntroPoll();
-        if (WaitNextEvent(everyEvent, &event,
-                          (gMenuScreen == MENU_SCREEN_CREDITS ||
-                           gMenuScreen == MENU_SCREEN_INTRO) ? 1 : 10, NULL)) {
-            HandleJA2Event(&event);
+        if (gActionScreenNeedsRender) {
+            gActionScreenNeedsRender = 0;
+            DrawMenuActionScreen();
         }
+        UpdateCursorPresentIfMoved();
+        SDL_Delay(16);
     }
 
-    window = gWindow;
-    if (gMenuWorld != NULL) {
-        DisposeGWorld(gMenuWorld);
+    if (gMenuSurface != NULL) {
+        SDL_FreeSurface(gMenuSurface);
+        gMenuSurface = NULL;
     }
-    if (gDiagnosticsWindow != NULL) {
-        DisposeWindow(gDiagnosticsWindow);
+    if (gCreditsSurface != NULL) {
+        SDL_FreeSurface(gCreditsSurface);
+        gCreditsSurface = NULL;
     }
+    if (gCursorSurface != NULL) {
+        SDL_FreeSurface(gCursorSurface);
+        gCursorSurface = NULL;
+    }
+    if (gVideoSurface != NULL) {
+        SDL_FreeSurface(gVideoSurface);
+        gVideoSurface = NULL;
+    }
+    JA2TextShutdown();
     JA2PPCIntroShutdown();
     JA2PPCVideoShutdown();
     JA2MenuMusicShutdown();
-    DisposeWindow(window);
+    SDL_DestroyWindow(gWindow);
+    SDL_Quit();
     return 0;
 }

@@ -7,220 +7,152 @@ static Boolean gDifficultySciFi = 1;
 static Boolean gDifficultyExtraWeapons = 0;
 static Boolean gDifficultyIronMan = 0;
 static Boolean gDifficultyBackgroundLoaded = 0;
-static Boolean gDifficultyPanelDarkened = 0;
-static Boolean gDifficultyControlsDrawn = 0;
-static Boolean gDifficultyButtonsDrawn = 0;
 
-
-void JA2ResetDifficultyScreen(void)
+static void DarkenDifficultyPanel(void)
 {
-    gDifficultyBackgroundLoaded = 0;
-    gDifficultyPanelDarkened = 0;
-    gDifficultyControlsDrawn = 0;
-    gDifficultyButtonsDrawn = 0;
-    InitCursor();
-}
+    SDL_Rect panel;
+    int x;
+    int y;
 
-static void RestoreDifficultyCheckBoxes(void)
-{
-    /* Infinite Mac corrupts the destination when CopyBits targets clipped
-       window regions. DrawDifficultyCheckBox clears its own backing instead. */
-    DebugLog("Difficulty: checkbox backing redraw selected; no window CopyBits");
-}
-
-static void DarkenDifficultyPanel(const Rect *panel)
-{
-    PixMapHandle pixMap;
-    unsigned char *base;
-    long rowBytes;
-    short x;
-    short y;
-
-    pixMap = gMenuWorld == NULL ? NULL : GetGWorldPixMap(gMenuWorld);
-    if (pixMap == NULL || !LockPixels(pixMap)) {
-        DebugLog("Difficulty: unable to lock cached PixMap for panel shading");
+    if (gMenuSurface == NULL) {
         return;
     }
-    base = (unsigned char *)GetPixBaseAddr(pixMap);
-    rowBytes = (**pixMap).rowBytes & 0x3fff;
-    for (y = panel->top; y < panel->bottom; ++y) {
-        unsigned short *pixel = (unsigned short *)(base +
-            (long)(y - (**pixMap).bounds.top) * rowBytes +
-            (long)(panel->left - (**pixMap).bounds.left) * 2);
-        for (x = panel->left; x < panel->right; ++x) {
-            /* Halve each RGB555 component without allowing bits to bleed
-               between the red, green, and blue fields. */
-            *pixel = (unsigned short)((*pixel & 0x7bde) >> 1);
-            ++pixel;
+    panel.x = 48;
+    panel.y = 55;
+    panel.w = 544;
+    panel.h = 323;
+    if (SDL_MUSTLOCK(gMenuSurface)) {
+        SDL_LockSurface(gMenuSurface);
+    }
+    for (y = panel.y; y < panel.y + panel.h; ++y) {
+        Uint16 *row = (Uint16 *)((Uint8 *)gMenuSurface->pixels +
+                                 (long)y * gMenuSurface->pitch);
+        for (x = panel.x; x < panel.x + panel.w; ++x) {
+            Uint16 pixel = row[x];
+            row[x] = (Uint16)((pixel & 0x7bde) >> 1);
         }
     }
-    UnlockPixels(pixMap);
+    if (SDL_MUSTLOCK(gMenuSurface)) {
+        SDL_UnlockSurface(gMenuSurface);
+    }
 }
 
 static void DrawDifficultyCheckBox(short x, short y, Boolean checked)
 {
-    Rect box;
-    RGBColor white = { 0xffff, 0xffff, 0xffff };
-    RGBColor red = { 0xffff, 0x2020, 0x2020 };
-    RGBColor backing = { 0x1800, 0x1800, 0x1800 };
-
-    SetRect(&box, x, y, (short)(x + 29), (short)(y + 29));
-    RGBForeColor(&backing);
-    PaintRect(&box);
-    RGBForeColor(&white);
-    FrameRect(&box);
-    FrameRect(&box);
+    FillRectRGB555(gMenuSurface, x, y, (short)(x + 29), (short)(y + 29),
+                   JA2_RGB555(24, 24, 24));
+    FrameRectRGB555(gMenuSurface, x, y, (short)(x + 29), (short)(y + 29),
+                    JA2_COLOR_WHITE);
     if (checked) {
-        RGBForeColor(&red);
-        MoveTo((short)(x + 2), (short)(y + 14));
-        LineTo((short)(x + 10), (short)(y + 23));
-        LineTo((short)(x + 28), (short)(y + 2));
+        DrawLineRGB555(gMenuSurface, (short)(x + 2), (short)(y + 14),
+                       (short)(x + 10), (short)(y + 23), JA2_COLOR_RED);
+        DrawLineRGB555(gMenuSurface, (short)(x + 10), (short)(y + 23),
+                       (short)(x + 28), (short)(y + 2), JA2_COLOR_RED);
     }
 }
 
 static void DrawDifficultyButtons(void)
 {
-    RGBColor white = { 0xffff, 0xffff, 0xffff };
-
-    if (gDifficultyButtonsDrawn) return;
-    if (!JA2RenderInterfaceButton(0, 141, 418)) {
+    if (!JA2RenderInterfaceButton(gMenuSurface, 0, 141, 418)) {
         DebugLog("Difficulty: PreferencesButtons normal frame unavailable");
     }
-    if (!JA2RenderInterfaceButton(1, 379, 418)) {
+    if (!JA2RenderInterfaceButton(gMenuSurface, 1, 379, 418)) {
         DebugLog("Difficulty: PreferencesButtons cancel frame unavailable");
     }
-    RGBForeColor(&white);
-    DrawCString(188, 442, "Ok");
-    DrawCString(400, 442, "Abbrechen");
-    gDifficultyButtonsDrawn = 1;
+    DrawCString(gMenuSurface, 188, 442, "Ok", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 400, 442, "Abbrechen", JA2_COLOR_WHITE);
+}
+
+void JA2ResetDifficultyScreen(void)
+{
+    gDifficultyBackgroundLoaded = 0;
 }
 
 void JA2DrawDifficultyScreen(void)
 {
-    Rect shade;
-    RGBColor white = { 0xffff, 0xffff, 0xffff };
-    RGBColor black = { 0x0000, 0x0000, 0x0000 };
-    RGBColor buttonFill = { 0x5140, 0x4930, 0x2700 };
-    RGBColor buttonBorder = { 0xb000, 0xa000, 0x7000 };
+    if (gMenuSurface == NULL) {
+        return;
+    }
+    DebugLog("Difficulty: rendering SDL2 RGB555 surface");
 
-    JA2InstallNormalCursor();
-    gMenuRenderDirectToWindow = 1;
-    JA2LogDifficultyRenderState("entry");
     if (!gDifficultyBackgroundLoaded) {
-        /* Decode the expensive STCI image once, like the main-menu cache. */
-        gMenuRenderDirectToWindow = 0;
         gDifficultyBackgroundLoaded = RenderIndexedBackground(
-            "Interface.slf", "OptionsScreenBackground.sti");
-        gDifficultyPanelDarkened = 0;
-        gMenuRenderDirectToWindow = 1;
-        JA2LogDifficultyRenderState("after STCI cache decode");
-        if (!gDifficultyBackgroundLoaded) {
-            DebugLog("Difficulty: background unavailable; using solid fallback");
-            SetPort(gWindow);
-            RGBForeColor(&black);
-            PaintRect(&gWindow->portRect);
-        }
-    }
-    if (gDifficultyBackgroundLoaded) {
-        if (!gDifficultyPanelDarkened) {
-            SetRect(&shade, 48, 55, 592, 378);
-            DarkenDifficultyPanel(&shade);
-            gDifficultyPanelDarkened = 1;
-            JA2LogDifficultyRenderState("after cached panel shade");
-        }
-        if (!gDifficultyControlsDrawn) {
-            JA2BlitMenuBackground();
-            gDifficultyControlsDrawn = 1;
-            JA2LogDifficultyRenderState("after initial cache blit");
+            gMenuSurface, "Interface.slf", "OptionsScreenBackground.sti");
+        if (gDifficultyBackgroundLoaded) {
+            DarkenDifficultyPanel();
         } else {
-            RestoreDifficultyCheckBoxes();
-            JA2LogDifficultyRenderState("after checkbox cache restore");
+            SDL_FillRect(gMenuSurface, NULL, JA2_COLOR_BLACK);
+            DebugLog("Difficulty: background unavailable; using solid fallback");
         }
     }
 
-    /* The 16-bit cache is presentation-only. Keep all text and controls in
-       the color window so QuickDraw cannot modify it between selections. */
-    SetGWorld((CGrafPtr)gWindow, GetMainDevice());
-    JA2LogDifficultyRenderState("before controls");
-    TextFont(systemFont);
-    TextSize(16);
-    TextMode(srcOr);
-    RGBForeColor(&white);
-    DrawCString(248, 80, "GRUNDEINSTELLUNGEN");
+    DrawCString(gMenuSurface, 248, 80, "GRUNDEINSTELLUNGEN", JA2_COLOR_WHITE);
 
-    DrawCString(80, 126, "Schwierigkeitsgrad");
-    DrawCString(100, 152, "Einsteiger");
-    DrawCString(100, 187, "Profi");
-    DrawCString(100, 222, "Alter Hase");
+    DrawCString(gMenuSurface, 80, 126, "Schwierigkeitsgrad", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 100, 152, "Einsteiger", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 100, 187, "Profi", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 100, 222, "Alter Hase", JA2_COLOR_WHITE);
     DrawDifficultyCheckBox(235, 141, gDifficultySelection == 0);
     DrawDifficultyCheckBox(235, 176, gDifficultySelection == 1);
     DrawDifficultyCheckBox(235, 211, gDifficultySelection == 2);
 
-    RGBForeColor(&white);
-    DrawCString(350, 126, "Waffen");
-    DrawCString(370, 152, "Normal");
-    DrawCString(370, 187, "Zusaetzliche Waffen");
+    DrawCString(gMenuSurface, 350, 126, "Waffen", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 370, 152, "Normal", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 370, 187, "Zusaetzliche Waffen", JA2_COLOR_WHITE);
     DrawDifficultyCheckBox(505, 141, !gDifficultyExtraWeapons);
     DrawDifficultyCheckBox(505, 176, gDifficultyExtraWeapons);
 
-    RGBForeColor(&white);
-    DrawCString(80, 286, "Extraschwer");
-    DrawCString(100, 322, "Ohne Zeitlimit");
-    DrawCString(100, 357, "Ironman");
-    DrawCString(100, 378, "(Speichern im Kampf nicht moeglich)");
+    DrawCString(gMenuSurface, 80, 286, "Extraschwer", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 100, 322, "Ohne Zeitlimit", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 100, 357, "Ironman", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 100, 378, "(Speichern im Kampf nicht moeglich)", JA2_COLOR_WHITE);
     DrawDifficultyCheckBox(235, 311, !gDifficultyIronMan);
     DrawDifficultyCheckBox(235, 346, gDifficultyIronMan);
 
-    RGBForeColor(&white);
-    DrawCString(350, 286, "Spielmodus");
-    DrawCString(370, 322, "Realistisch");
-    DrawCString(370, 357, "SciFi");
+    DrawCString(gMenuSurface, 350, 286, "Spielmodus", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 370, 322, "Realistisch", JA2_COLOR_WHITE);
+    DrawCString(gMenuSurface, 370, 357, "SciFi", JA2_COLOR_WHITE);
     DrawDifficultyCheckBox(505, 311, !gDifficultySciFi);
     DrawDifficultyCheckBox(505, 346, gDifficultySciFi);
 
-    (void)buttonFill;
-    (void)buttonBorder;
     DrawDifficultyButtons();
-    TextMode(srcCopy);
-    gMenuRenderDirectToWindow = 0;
-    JA2LogDifficultyRenderState("after controls");
-    ShowCursor();
+    JA2BlitMenuBackground();
 }
 
-static Boolean DifficultyOptionAt(Point point)
+static Boolean DifficultyOptionAt(short x, short y)
 {
-    if (point.h >= 210 && point.h < 300 && point.v >= 130 && point.v < 245) {
-        if (point.v < 165) gDifficultySelection = 0;
-        else if (point.v < 200) gDifficultySelection = 1;
+    if (x >= 210 && x < 300 && y >= 130 && y < 245) {
+        if (y < 165) gDifficultySelection = 0;
+        else if (y < 200) gDifficultySelection = 1;
         else gDifficultySelection = 2;
         return 1;
     }
-    if (point.h >= 480 && point.h < 570 && point.v >= 130 && point.v < 210) {
-        gDifficultyExtraWeapons = point.v >= 165;
+    if (x >= 480 && x < 570 && y >= 130 && y < 210) {
+        gDifficultyExtraWeapons = y >= 165;
         return 1;
     }
-    if (point.h >= 210 && point.h < 300 && point.v >= 300 && point.v < 390) {
-        gDifficultyIronMan = point.v >= 335;
+    if (x >= 210 && x < 300 && y >= 300 && y < 390) {
+        gDifficultyIronMan = y >= 335;
         return 1;
     }
-    if (point.h >= 480 && point.h < 570 && point.v >= 300 && point.v < 390) {
-        gDifficultySciFi = point.v >= 335;
+    if (x >= 480 && x < 570 && y >= 300 && y < 390) {
+        gDifficultySciFi = y >= 335;
         return 1;
     }
     return 0;
 }
 
-void JA2HandleDifficultyClick(Point point)
+void JA2HandleDifficultyClick(short localX, short localY)
 {
-    DebugLog("Difficulty: click local=%d,%d", point.h, point.v);
-    if (DifficultyOptionAt(point)) {
+    DebugLog("Difficulty: click local=%d,%d", localX, localY);
+    if (DifficultyOptionAt(localX, localY)) {
         DebugLog("Difficulty: selection changed difficulty=%d extraWeapons=%d ironMan=%d sciFi=%d",
                  gDifficultySelection, gDifficultyExtraWeapons,
                  gDifficultyIronMan, gDifficultySciFi);
         JA2DrawDifficultyScreen();
         return;
     }
-    if (point.h >= 141 && point.h < 261 && point.v >= 418 && point.v < 454) {
+    if (localX >= 141 && localX < 261 && localY >= 418 && localY < 454) {
         gNewGameDifficulty = gDifficultySelection;
         DebugLog("Difficulty: OK difficulty=%d extraWeapons=%d ironMan=%d sciFi=%d",
                  gDifficultySelection, gDifficultyExtraWeapons,
@@ -236,9 +168,9 @@ void JA2HandleDifficultyClick(Point point)
         gActionScreenNeedsRender = 1;
         return;
     }
-    if (point.h >= 379 && point.h < 499 && point.v >= 418 && point.v < 454) {
+    if (localX >= 379 && localX < 499 && localY >= 418 && localY < 454) {
         DebugLog("Difficulty: cancelled; returning to main menu");
-        gDifficultyBackgroundLoaded = 0;
+        JA2ResetDifficultyScreen();
         RestoreMainMenu();
     }
 }

@@ -18,14 +18,17 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "RetroPPC")
         "Use a Retro68 toolchain: -DCMAKE_TOOLCHAIN_FILE=/path/to/Retro68-build/toolchain/powerpc-apple-macos/cmake/retroppc.toolchain.cmake")
 endif()
 
-# Stage 1 of the SDL2 rendering backend migration: build the vendored
-# laulandn/sdl2macos9 fork as libSDL2.a/libSDL2main.a. See
-# retro68/JA2_PPC_SDL2_MIGRATION_PLAN.md. Nothing below links against it yet.
+# Build the vendored laulandn/sdl2macos9 fork as libSDL2.a/libSDL2main.a.
+# The JA2PPC target below links it through target_link_sdl2_classic(); see
+# retro68/JA2_PPC_SDL2_MIGRATION_PLAN.md for the required link/stub policy.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SDL2Classic.cmake)
 
 add_application(JA2PPC
     ja2_mac.c
     ja2_mac_internal.h
+    ja2_ppc_text.c
+    ja2_ppc_text.h
+    sdl2_gl_stub.c
     ja2_game_init_options.c
     ja2_game_init_options.h
     ja2_new_game_init.c
@@ -47,6 +50,7 @@ set_target_properties(JA2PPC PROPERTIES
     LINK_FLAGS "-Wl,-gc-sections"
 )
 target_link_libraries(JA2PPC QuickTimeLib)
+target_link_sdl2_classic(JA2PPC)
 if(JA2_LANGUAGE_LOWER STREQUAL "german")
     target_compile_definitions(JA2PPC PRIVATE JA2_LANGUAGE_GERMAN=1)
 else()
