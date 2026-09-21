@@ -30,8 +30,15 @@ static unsigned char *gLaptopFontData;
 static unsigned long gLaptopFontLength;
 static unsigned long gLaptopFontStoredSize;
 static unsigned short gLaptopFontObjectCount;
+static unsigned char *gLaptopTitleFontData;
+static unsigned long gLaptopTitleFontLength;
+static unsigned long gLaptopTitleFontStoredSize;
+static unsigned short gLaptopTitleFontObjectCount;
+static unsigned char *gLaptopHelpTextData;
+static unsigned long gLaptopHelpTextLength;
 static Boolean gLaptopEntered;
 static Boolean gLaptopWelcomeVisible;
+static Boolean gLaptopHideHelp;
 static short gLaptopHelpPage;
 
 static unsigned short ReadLE16(const unsigned char *bytes)
@@ -327,6 +334,39 @@ static Boolean LoadLaptopFont(void)
     return 1;
 }
 
+static Boolean LoadLaptopTitleFont(void)
+{
+    if (gLaptopTitleFontData != NULL) return 1;
+    if (!ReadArchiveEntry("Fonts.slf", "FONT12ARIAL.sti", &gLaptopTitleFontData,
+                          &gLaptopTitleFontLength)) {
+        return 0;
+    }
+    gLaptopTitleFontStoredSize = ReadLE32(&gLaptopTitleFontData[8]);
+    gLaptopTitleFontObjectCount = ReadLE16(&gLaptopTitleFontData[28]);
+    if (gLaptopTitleFontLength < 64 + 768 +
+            (unsigned long)gLaptopTitleFontObjectCount * 16 +
+            gLaptopTitleFontStoredSize) {
+        free(gLaptopTitleFontData);
+        gLaptopTitleFontData = NULL;
+        return 0;
+    }
+    DebugLog("Laptop font: loaded FONT12ARIAL.sti objects=%u",
+             gLaptopTitleFontObjectCount);
+    return 1;
+}
+
+static Boolean LoadLaptopHelpText(void)
+{
+    if (gLaptopHelpTextData != NULL) return 1;
+    if (!ReadArchiveEntry("BINARYDATA.SLF", "Help.edt", &gLaptopHelpTextData,
+                          &gLaptopHelpTextLength)) {
+        DebugLog("Laptop help: Help.edt unavailable; using fallback text");
+        return 0;
+    }
+    DebugLog("Laptop help: loaded Help.edt length=%lu", gLaptopHelpTextLength);
+    return 1;
+}
+
 static unsigned short LaptopFontIndex(unsigned char character)
 {
     if (character >= 'A' && character <= 'Z') return (unsigned short)(character - 'A');
@@ -364,6 +404,13 @@ static unsigned short LaptopFontIndex(unsigned char character)
     case '?': return 90;
     case '/': return 91;
     case ' ': return 92;
+    case 196: return 94;
+    case 214: return 95;
+    case 220: return 96;
+    case 228: return 97;
+    case 246: return 98;
+    case 252: return 99;
+    case 223: return 100;
     default: return 0;
     }
 }
@@ -450,6 +497,97 @@ static void DrawLaptopTextLine(SDL_Surface *surface, short x, short y,
     if (SDL_MUSTLOCK(surface)) {
         SDL_UnlockSurface(surface);
     }
+}
+
+static void DrawLaptopTitleLine(SDL_Surface *surface, short x, short y,
+                                const char *text, Uint16 color)
+{
+    unsigned char *fontData = gLaptopFontData;
+    unsigned long fontLength = gLaptopFontLength;
+    unsigned long fontStoredSize = gLaptopFontStoredSize;
+    unsigned short fontObjectCount = gLaptopFontObjectCount;
+
+    if (LoadLaptopTitleFont()) {
+        gLaptopFontData = gLaptopTitleFontData;
+        gLaptopFontLength = gLaptopTitleFontLength;
+        gLaptopFontStoredSize = gLaptopTitleFontStoredSize;
+        gLaptopFontObjectCount = gLaptopTitleFontObjectCount;
+        DrawLaptopTextLine(surface, x, y, text, color);
+        gLaptopFontData = fontData;
+        gLaptopFontLength = fontLength;
+        gLaptopFontStoredSize = fontStoredSize;
+        gLaptopFontObjectCount = fontObjectCount;
+    } else {
+        JA2DrawText(surface, x, y, text, color, 12);
+    }
+}
+
+static Boolean ReadHelpTextRecord(short record, char *output, short outputSize)
+{
+    unsigned long offset;
+    short out = 0;
+    unsigned short index;
+
+    if (!LoadLaptopHelpText() || record < 0 || outputSize < 2) return 0;
+    offset = (unsigned long)record * 1280;
+    if (offset + 1280 > gLaptopHelpTextLength) return 0;
+    for (index = 0; index < 640 && out < outputSize - 1; ++index) {
+        unsigned short character = ReadLE16(gLaptopHelpTextData + offset + index * 2);
+        if (character == 0) break;
+        if (character > 33) --character;
+        if (character == '\r' || character == '\n') {
+            output[out++] = '\n';
+        } else if (character < 256) {
+            output[out++] = (char)character;
+        } else {
+            output[out++] = '?';
+        }
+    }
+    output[out] = 0;
+    return 1;
+}
+
+static short LaptopTextWidth(const char *text);
+
+static short DrawHelpTextWrapped(SDL_Surface *surface, short x, short y,
+                                 short width, const char *text, Uint16 color)
+{
+    char line[256];
+    const char *cursor = text;
+    short lineY = y;
+
+    while (*cursor != 0) {
+        short lineLength = 0;
+        while (*cursor != 0 && *cursor != '\n') {
+            const char *wordEnd = cursor;
+            short wordLength;
+            short candidateLength;
+            while (*wordEnd != 0 && *wordEnd != ' ' && *wordEnd != '\n') ++wordEnd;
+            wordLength = (short)(wordEnd - cursor);
+            candidateLength = (short)(lineLength + wordLength + (lineLength ? 1 : 0));
+            if (candidateLength >= sizeof(line)) break;
+            memcpy(line + lineLength + (lineLength ? 1 : 0), cursor, wordLength);
+            line[candidateLength] = 0;
+            if (lineLength != 0 && LaptopTextWidth(line) > width) {
+                line[lineLength] = 0;
+                DrawLaptopTextLine(surface, x, lineY, line, color);
+                lineY = (short)(lineY + 12);
+                lineLength = 0;
+                continue;
+            }
+            lineLength = candidateLength;
+            cursor = wordEnd;
+            while (*cursor == ' ') ++cursor;
+        }
+        if (lineLength != 0) {
+            line[lineLength] = 0;
+            DrawLaptopTextLine(surface, x, lineY, line, color);
+            lineY = (short)(lineY + 12);
+        }
+        if (*cursor == '\n') ++cursor;
+        lineY = (short)(lineY + 2);
+    }
+    return lineY;
 }
 
 static short LaptopTextWidth(const char *text)
@@ -541,6 +679,30 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
           "und den aktuellen Kontostand.", NULL, NULL },
         { "Hier sehen Sie die Statistik Ihrer Soeldner.", NULL, NULL, NULL }
     };
+    static const short buttonRecords[] = { 3, 6, 8, 10, 12, 14, 16, 19 };
+    static const short bodyRecords[8][15] = {
+        { 4, 5, -1 }, { 7, -1 }, { 9, -1 }, { 11, -1 },
+        { 13, -1 }, { 15, -1 }, { 17, 18, -1 },
+        { 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34 }
+    };
+    char title[512];
+    char subtitle[512];
+    char footer[512];
+    char buttonText[8][128];
+    Boolean exactText;
+
+    exactText = ReadHelpTextRecord(2, title, sizeof(title)) &&
+                ReadHelpTextRecord(0, subtitle, sizeof(subtitle)) &&
+                ReadHelpTextRecord(1, footer, sizeof(footer));
+    if (exactText) {
+        for (index = 0; index < 8; ++index) {
+            if (!ReadHelpTextRecord(buttonRecords[index], buttonText[index],
+                                    sizeof(buttonText[index]))) {
+                exactText = 0;
+                break;
+            }
+        }
+    }
 
     /* HelpScreen.sti supplies the original border and dark panel artwork. */
     PrepareLaptopHelpAssets();
@@ -551,37 +713,74 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
     for (index = 0; index < 8; ++index) {
         short buttonX = (short)(LAPTOP_HELP_X + 11);
         short buttonY = (short)(LAPTOP_HELP_Y + 12 + index * 30);
-        short textX = (short)(buttonX + (77 - LaptopTextWidth(buttons[index])) / 2);
+        const char *buttonLabel = exactText ? buttonText[index] : buttons[index];
+        short textX = (short)(buttonX + (77 - LaptopTextWidth(buttonLabel)) / 2);
         SDL_Surface *buttonSurface = index == gLaptopHelpPage ?
             gLaptopHelpButtonSelected : gLaptopHelpButtonNormal;
         if (buttonSurface != NULL) {
             SDL_Rect destination = { buttonX, buttonY, 0, 0 };
             SDL_BlitSurface(buttonSurface, NULL, surface, &destination);
         }
-        DrawLaptopTextLine(surface, textX, (short)(buttonY + 6), buttons[index],
+        DrawLaptopTextLine(surface, textX, (short)(buttonY + 6), buttonLabel,
                            JA2_COLOR_WHITE);
     }
-    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 107), (short)(LAPTOP_HELP_Y + 7),
-                       gLaptopHelpPage == 0 ? "Ihr Laptop heisst Sie herzlich willkommen!" :
-                       pageTitles[gLaptopHelpPage], JA2_COLOR_WHITE);
-    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 107), (short)(LAPTOP_HELP_Y + 22),
-                       "(Druecken Sie H, um jederzeit Hilfe aufzurufen)", JA2_COLOR_WHITE);
-    for (index = 0; index < 4 && pageBody[gLaptopHelpPage][index] != NULL; ++index) {
-        DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 107),
-                           (short)(LAPTOP_HELP_Y + 48 + index * 15),
-                           pageBody[gLaptopHelpPage][index], JA2_COLOR_WHITE);
+    if (exactText) {
+        short textY;
+        DrawLaptopTitleLine(surface, (short)(LAPTOP_HELP_X + 107),
+                            (short)(LAPTOP_HELP_Y + 7), title, JA2_COLOR_WHITE);
+        DrawLaptopTitleLine(surface, (short)(LAPTOP_HELP_X + 107),
+                            (short)(LAPTOP_HELP_Y + 22), subtitle, JA2_COLOR_WHITE);
+        textY = (short)(LAPTOP_HELP_Y + 48);
+        for (index = 0; index < 15 && bodyRecords[gLaptopHelpPage][index] >= 0;
+             ++index) {
+            char paragraph[512];
+            if (ReadHelpTextRecord(bodyRecords[gLaptopHelpPage][index],
+                                   paragraph, sizeof(paragraph))) {
+                textY = DrawHelpTextWrapped(surface, (short)(LAPTOP_HELP_X + 107),
+                                            textY, 270, paragraph, JA2_COLOR_WHITE);
+            }
+        }
+    } else {
+        DrawLaptopTitleLine(surface, (short)(LAPTOP_HELP_X + 107),
+                            (short)(LAPTOP_HELP_Y + 7),
+                            gLaptopHelpPage == 0 ? "Ihr Laptop heisst Sie herzlich willkommen!" :
+                            pageTitles[gLaptopHelpPage], JA2_COLOR_WHITE);
+        DrawLaptopTitleLine(surface, (short)(LAPTOP_HELP_X + 107),
+                            (short)(LAPTOP_HELP_Y + 22),
+                            "(Druecken Sie H, um jederzeit Hilfe aufzurufen)",
+                            JA2_COLOR_WHITE);
+        for (index = 0; index < 4 && pageBody[gLaptopHelpPage][index] != NULL; ++index) {
+            DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 107),
+                               (short)(LAPTOP_HELP_Y + 48 + index * 15),
+                               pageBody[gLaptopHelpPage][index], JA2_COLOR_WHITE);
+        }
     }
-    FillRectRGB555(surface, (short)(LAPTOP_HELP_X + 11),
-                   (short)(LAPTOP_HELP_Y + 263),
-                   (short)(LAPTOP_HELP_X + 28),
-                   (short)(LAPTOP_HELP_Y + 280), JA2_COLOR_BLACK);
-    FrameRectRGB555(surface, (short)(LAPTOP_HELP_X + 11),
-                    (short)(LAPTOP_HELP_Y + 263),
-                    (short)(LAPTOP_HELP_X + 28),
-                    (short)(LAPTOP_HELP_Y + 280), JA2_COLOR_WHITE);
-    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 38),
-                       (short)(LAPTOP_HELP_Y + 276),
-                       "Diese Hilfe nicht mehr anzeigen", JA2_COLOR_WHITE);
+    FillRectRGB555(surface, (short)(LAPTOP_HELP_X + 92 + 4),
+                   (short)(LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 - 3),
+                   (short)(LAPTOP_HELP_X + 92 + 21),
+                   (short)(LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 + 14),
+                   JA2_COLOR_BLACK);
+    FrameRectRGB555(surface, (short)(LAPTOP_HELP_X + 92 + 4),
+                    (short)(LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 - 3),
+                    (short)(LAPTOP_HELP_X + 92 + 21),
+                   (short)(LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 + 14),
+                   JA2_COLOR_WHITE);
+    if (gLaptopHideHelp) {
+        DrawLineRGB555(surface, (short)(LAPTOP_HELP_X + 92 + 6),
+                       (short)(LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 + 4),
+                       (short)(LAPTOP_HELP_X + 92 + 18),
+                       (short)(LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 + 13),
+                       JA2_COLOR_WHITE);
+        DrawLineRGB555(surface, (short)(LAPTOP_HELP_X + 92 + 18),
+                       (short)(LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 + 4),
+                       (short)(LAPTOP_HELP_X + 92 + 6),
+                       (short)(LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 + 13),
+                       JA2_COLOR_WHITE);
+    }
+    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 92 + 5 + 25),
+                       (short)(LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 + 2),
+                       exactText ? footer : "Diese Hilfe nicht mehr anzeigen",
+                       JA2_COLOR_WHITE);
     if (gLaptopHelpExit != NULL) {
         SDL_Rect destination = { (short)(LAPTOP_HELP_X + 92 + 291),
                                  (short)(LAPTOP_HELP_Y + 9), 0, 0 };
@@ -644,6 +843,7 @@ Boolean JA2LaptopRender(void)
     if (!gLaptopEntered) {
         gLaptopEntered = 1;
         gLaptopWelcomeVisible = 1;
+        gLaptopHideHelp = 0;
         gLaptopHelpPage = 0;
         JA2LaptopMusicStart();
         DebugLog("Laptop: entered original-coordinate SDL2 screen welcomeVisible=1");
@@ -670,6 +870,12 @@ void JA2LaptopHandleClick(short x, short y)
                    y >= LAPTOP_HELP_Y + 12 && y < LAPTOP_HELP_Y + 12 + 8 * 30) {
             gLaptopHelpPage = (short)((y - LAPTOP_HELP_Y - 12) / 30);
             DebugLog("Laptop: help page selected=%d", gLaptopHelpPage);
+            JA2LaptopRender();
+        } else if (x >= LAPTOP_HELP_X + 92 + 4 && x < LAPTOP_HELP_X + 92 + 21 &&
+                   y >= LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 - 3 &&
+                   y < LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 + 14) {
+            gLaptopHideHelp = !gLaptopHideHelp;
+            DebugLog("Laptop: help hide checkbox=%d", gLaptopHideHelp);
             JA2LaptopRender();
         }
         return;
