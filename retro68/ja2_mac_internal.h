@@ -15,7 +15,8 @@ enum {
     MENU_SCREEN_INTRO,
     MENU_SCREEN_LOAD_GAME,
     MENU_SCREEN_OPTIONS,
-    MENU_SCREEN_CREDITS
+    MENU_SCREEN_CREDITS,
+    MENU_SCREEN_LAPTOP
 };
 
 enum {
@@ -49,6 +50,8 @@ extern short gNewGameOpeningEmails;
 extern short gNewGameSectorX;
 extern short gNewGameSectorY;
 extern Boolean gNewGameGameStarted;
+extern short gNewGameScreenCount;
+extern short gNewGamePendingScreen;
 
 void DebugLog(const char *format, ...);
 Boolean RenderIndexedBackground(SDL_Surface *destination, const char *archiveName,

@@ -27,6 +27,7 @@
 #include "ja2_slf.h"
 #include "ja2_mac_internal.h"
 #include "ja2_game_init_options.h"
+#include "ja2_options.h"
 #include "ja2_ppc_text.h"
 
 #if defined(JA2_LANGUAGE_GERMAN)
@@ -1520,6 +1521,35 @@ static void DrawMenuActionScreen(void)
         return;
     }
     if (!EnsureMenuSurface()) return;
+
+    if (gMenuScreen == MENU_SCREEN_LAPTOP) {
+        DebugLog("Laptop: rendering SDL2 placeholder state=%d gameStarted=%d "
+                 "screenCount=%d pendingScreen=%d cash=%ld emails=%d sector=%d,%d",
+                 gNewGameState, gNewGameGameStarted, gNewGameScreenCount,
+                 gNewGamePendingScreen, gNewGameStartingCash,
+                 gNewGameOpeningEmails, gNewGameSectorX, gNewGameSectorY);
+        SDL_FillRect(gMenuSurface, NULL, JA2_RGB555(18, 22, 34));
+        JA2DrawText(gMenuSurface, 60, 110, "Laptop", JA2_COLOR_ACCENT, 24);
+        DrawCString(gMenuSurface, 60, 160,
+                    "InitNewGame(FALSE) ist bis zum Laptop-Uebergang ausgefuehrt.",
+                    JA2_COLOR_WHITE);
+        DrawCString(gMenuSurface, 60, 190,
+                    "Laptop- und Strategic-Subsystem folgen als separater PPC-Port.",
+                    JA2_COLOR_WHITE);
+        sprintf(status, "Startkapital: %ld   Eroeffnungs-E-Mails: %d",
+                gNewGameStartingCash, gNewGameOpeningEmails);
+        DrawCString(gMenuSurface, 60, 230, status, JA2_COLOR_WHITE);
+        sprintf(status, "Startsektor: A9 Omerta (%d,%d,0)",
+                gNewGameSectorX, gNewGameSectorY);
+        DrawCString(gMenuSurface, 60, 252, status, JA2_COLOR_WHITE);
+        DrawCString(gMenuSurface, 60, 292,
+                    "PPC-Grenze: InitLaptopAndLaptopScreens / InitStrategicLayer",
+                    JA2_COLOR_ACCENT);
+        DrawCString(gMenuSurface, 60, 340, "ESC: Zurueck zum Hauptmenue", JA2_COLOR_WHITE);
+        JA2BlitMenuBackground();
+        return;
+    }
+
     action = (short)(gMenuScreen - MENU_SCREEN_NEW_GAME);
     if (gMenuScreen > MENU_SCREEN_DIFFICULTY) {
         --action;
@@ -1801,6 +1831,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     DebugLog("JA2 PPC startup (SDL2 rendering backend)");
+    JA2OptionsLoad();
     JA2MenuMusicSetLogger(DebugLog);
     DebugLog("Language: %s",
 #if defined(JA2_LANGUAGE_GERMAN)

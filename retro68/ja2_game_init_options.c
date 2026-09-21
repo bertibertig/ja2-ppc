@@ -163,6 +163,17 @@ void JA2HandleDifficultyClick(short localX, short localY)
             gMenuScreen = MENU_SCREEN_NEW_GAME;
             if (!JA2InitializeNewGame()) {
                 DebugLog("New Game: initialization failed after intro fallback");
+            } else {
+                DebugLog("New Game: intro fallback reached menuScreen=%d state=%d",
+                         gMenuScreen, gNewGameState);
+            }
+        } else {
+            if (JA2PPCIntroIsActive()) {
+                DebugLog("Intro: started successfully; waiting for completion before New Game "
+                         "menuScreen=%d", gMenuScreen);
+            } else {
+                DebugLog("Intro: completed synchronously; New Game already reached "
+                         "menuScreen=%d", gMenuScreen);
             }
         }
         gActionScreenNeedsRender = 1;

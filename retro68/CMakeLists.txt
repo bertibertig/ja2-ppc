@@ -31,6 +31,8 @@ add_application(JA2PPC
     sdl2_gl_stub.c
     ja2_game_init_options.c
     ja2_game_init_options.h
+    ja2_options.c
+    ja2_options.h
     ja2_new_game_init.c
     ja2_new_game_init.h
     ja2/Build/Utils/Cinematics.c
@@ -166,6 +168,8 @@ if(JA2_DATA_DIR)
             "${CMAKE_CURRENT_BINARY_DIR}/JA2PPC.APPL" "${JA2_BUNDLE_DIR}/JA2PPC.APPL"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_CURRENT_BINARY_DIR}/JA2PPC.bin" "${JA2_BUNDLE_DIR}/JA2PPC.bin"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/options.cfg" "${JA2_BUNDLE_DIR}/options.cfg"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${JA2_DATA_DIR}/Data" "${JA2_BUNDLE_DATA_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E remove_directory "${JA2_BUNDLE_DATA_DIR}/Intro"
@@ -175,6 +179,7 @@ if(JA2_DATA_DIR)
             "${JA2_DATA_DIR}/Ja2.ini" "${JA2_BUNDLE_DIR}/Ja2.ini"
         COMMAND "${CMAKE_COMMAND}" -E touch "${JA2_BUNDLE_STAMP}"
         DEPENDS JA2PPC_APPL ${JA2_BUNDLE_VIDEO_DEPENDENCY}
+            "${CMAKE_CURRENT_SOURCE_DIR}/options.cfg"
         VERBATIM
     )
     add_custom_target(JA2PPC_BUNDLE ALL DEPENDS "${JA2_BUNDLE_STAMP}")

@@ -69,19 +69,28 @@ on x86 struct layout and reports the number of valid indexed entries.
 ## New Game test slice
 
 In the German debug build, select `Neues Spiel` from the main menu. The PPC
-shell now performs the first-run portion of the original `InitNewGame(FALSE)`
-flow: it records the laptop and strategic initialization boundary, sets the
-new-game flag, queues the five opening emails, selects medium difficulty with
-35,000 starting cash, selects A9 Omerta, and marks the campaign started. The
-screen displays these values as a testable result. The actual laptop and
+shell now follows the first-run branch of the original `InitNewGame(FALSE)`
+flow through its `LAPTOP_SCREEN` transition: it records the laptop and
+strategic initialization boundary, queues the five opening emails, selects
+medium difficulty with 35,000 starting cash, selects A9 Omerta, sets the
+screen-count transition to 1, and marks the campaign started. The Laptop
+placeholder displays these values as a testable result. The actual laptop and
 strategic subsystems remain future migration work and are explicitly reported
-as such in the diagnostics.
+as such in the diagnostics and placeholder screen.
 
 The debug build writes `JA2PPC-Debug.log` beside the application and mirrors
 the messages in the `JA2 Debug` window. For a New Game failure, capture the
 log from `German main menu: new game selected` through the final `New Game:`
 phase message. The log includes the selected difficulty, starting cash,
 opening-email count, initial sector, game-started flag, and transition target.
+
+## Runtime options
+
+`options.cfg` is copied beside the application in the generated bundle. Set
+`skip_intros=1` to skip the four intro videos during debugging. The accepted
+true values are `1`, `true`, `yes`, and `on`; the default is `0`, preserving
+the normal intro flow. The option is loaded once at startup and recorded in
+`JA2PPC-Debug.log`.
 
 When `JA2_DATA_DIR` is configured, the build extracts the four beginning-game
 Smacker files from `Data/Intro.slf` and converts them to cached 640x480 MOV
