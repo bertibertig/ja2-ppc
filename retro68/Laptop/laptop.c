@@ -449,13 +449,13 @@ static void DrawLaptopTextLine(SDL_Surface *surface, short x, short y,
 
 static void DrawLaptopText(SDL_Surface *surface)
 {
-    DrawLaptopTextLine(surface, 59, 98, "E-mail", JA2_COLOR_BLACK);
-    DrawLaptopTextLine(surface, 59, 130, "Web", JA2_COLOR_BLACK);
-    DrawLaptopTextLine(surface, 59, 162, "Dateien", JA2_COLOR_BLACK);
-    DrawLaptopTextLine(surface, 59, 194, "Logbuch", JA2_COLOR_BLACK);
-    DrawLaptopTextLine(surface, 59, 226, "Personal", JA2_COLOR_BLACK);
-    DrawLaptopTextLine(surface, 59, 273, "Finanzen", JA2_COLOR_BLACK);
-    DrawLaptopTextLine(surface, 52, 402, "Schliessen", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 77, "E-mail", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 109, "Web", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 141, "Dateien", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 173, "Logbuch", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 205, "Personal", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 252, "Finanzen", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 54, 389, "Schliessen", JA2_COLOR_BLACK);
     DrawLaptopTextLine(surface, 47, 224, "Soeldner: 0", JA2_COLOR_BLACK);
     {
         char balance[32];
@@ -565,7 +565,7 @@ static Boolean BuildLaptopBase(void)
 #endif
     for (index = 0; index < 7; ++index) {
         DrawStiObject(gLaptopBaseSurface, "Laptop.slf", buttonEntries[index],
-                      (unsigned short)index, 29, buttonY[index]);
+                      0, 29, buttonY[index]);
     }
     DrawStiObject(gLaptopBaseSurface, "Laptop.slf", "lights.sti", 0, 44, 466);
     DrawStiObject(gLaptopBaseSurface, "Laptop.slf", "lights.sti", 1, 88, 466);
