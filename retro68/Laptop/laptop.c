@@ -24,6 +24,7 @@
 #define LAPTOP_HELP_TEXT_Y (LAPTOP_HELP_Y + 48)
 #define LAPTOP_HELP_TEXT_WIDTH 270
 #define LAPTOP_HELP_TEXT_HEIGHT 228
+#define LAPTOP_HELP_TEXT_VISIBLE_HEIGHT 212
 #define LAPTOP_HELP_SCROLL_X (LAPTOP_HELP_X + 92 + 292)
 #define LAPTOP_HELP_SCROLL_Y (LAPTOP_HELP_Y + 63)
 #define LAPTOP_HELP_SCROLL_HEIGHT 182
@@ -424,13 +425,13 @@ static unsigned short LaptopFontIndex(unsigned char character)
     case '?': return 90;
     case '/': return 91;
     case ' ': return 92;
-    case 196: return 94;
-    case 214: return 95;
-    case 220: return 96;
-    case 228: return 97;
-    case 246: return 98;
-    case 252: return 99;
-    case 223: return 100;
+    case 196: return 93;
+    case 214: return 94;
+    case 220: return 95;
+    case 228: return 96;
+    case 246: return 97;
+    case 252: return 98;
+    case 223: return 99;
     default: return 0;
     }
 }
@@ -770,7 +771,7 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
         textY = (short)(LAPTOP_HELP_TEXT_Y - gLaptopHelpScrollOffset * 12);
         gLaptopTextClipEnabled = 1;
         gLaptopTextClipTop = LAPTOP_HELP_TEXT_Y;
-        gLaptopTextClipBottom = LAPTOP_HELP_TEXT_Y + LAPTOP_HELP_TEXT_HEIGHT;
+        gLaptopTextClipBottom = LAPTOP_HELP_TEXT_Y + LAPTOP_HELP_TEXT_VISIBLE_HEIGHT;
         for (index = 0; index < 15 && bodyRecords[gLaptopHelpPage][index] >= 0;
              ++index) {
             char paragraph[512];
@@ -795,7 +796,7 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
                             JA2_COLOR_WHITE);
         gLaptopTextClipEnabled = 1;
         gLaptopTextClipTop = LAPTOP_HELP_TEXT_Y;
-        gLaptopTextClipBottom = LAPTOP_HELP_TEXT_Y + LAPTOP_HELP_TEXT_HEIGHT;
+        gLaptopTextClipBottom = LAPTOP_HELP_TEXT_Y + LAPTOP_HELP_TEXT_VISIBLE_HEIGHT;
         for (index = 0; index < 4 && pageBody[gLaptopHelpPage][index] != NULL; ++index) {
             DrawLaptopTextLine(surface, LAPTOP_HELP_TEXT_X,
                                (short)(LAPTOP_HELP_TEXT_Y + index * 15),
@@ -804,8 +805,8 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
         gLaptopTextClipEnabled = 0;
         gLaptopHelpTotalLines = (short)(index * 2);
     }
-    if (gLaptopHelpTotalLines > LAPTOP_HELP_TEXT_HEIGHT / 12) {
-        short visibleLines = LAPTOP_HELP_TEXT_HEIGHT / 12;
+    if (gLaptopHelpTotalLines > LAPTOP_HELP_TEXT_VISIBLE_HEIGHT / 12) {
+        short visibleLines = LAPTOP_HELP_TEXT_VISIBLE_HEIGHT / 12;
         short thumbHeight = (short)(LAPTOP_HELP_SCROLL_HEIGHT * visibleLines /
                                     gLaptopHelpTotalLines);
         short maxOffset = (short)(gLaptopHelpTotalLines - visibleLines);
@@ -864,7 +865,7 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
 
 static void ScrollLaptopHelp(short amount)
 {
-    short visibleLines = LAPTOP_HELP_TEXT_HEIGHT / 12;
+    short visibleLines = LAPTOP_HELP_TEXT_VISIBLE_HEIGHT / 12;
     short maxOffset = (short)(gLaptopHelpTotalLines - visibleLines);
     short nextOffset;
 
@@ -974,7 +975,7 @@ void JA2LaptopHandleClick(short x, short y)
             ScrollLaptopHelp(1);
         } else if (x >= LAPTOP_HELP_SCROLL_X && x < LAPTOP_HELP_SCROLL_X + 20 &&
                    y >= LAPTOP_HELP_SCROLL_Y && y < LAPTOP_HELP_SCROLL_Y + LAPTOP_HELP_SCROLL_HEIGHT) {
-            short visibleLines = LAPTOP_HELP_TEXT_HEIGHT / 12;
+            short visibleLines = LAPTOP_HELP_TEXT_VISIBLE_HEIGHT / 12;
             short maxOffset = (short)(gLaptopHelpTotalLines - visibleLines);
             short relative = (short)(y - LAPTOP_HELP_SCROLL_Y);
             if (maxOffset > 0) {
