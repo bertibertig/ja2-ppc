@@ -79,6 +79,7 @@ void JA2LaptopShutdown(void);
 Boolean JA2RenderInterfaceButton(SDL_Surface *destination, short objectIndex,
                                  short x, short y);
 Boolean JA2InstallNormalCursor(void);
+Boolean JA2InstallLaptopCursor(void);
 
 Boolean JA2InitializeNewGame(void);
 void JA2DrawDifficultyScreen(void);

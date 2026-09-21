@@ -7,6 +7,7 @@
 
 static Boolean gOptionsLoaded;
 static Boolean gSkipIntros;
+static Boolean gShowFPS = 1;
 
 static char *Trim(char *text)
 {
@@ -75,10 +76,11 @@ void JA2OptionsLoad(void)
     }
     gOptionsLoaded = 1;
     gSkipIntros = 0;
+    gShowFPS = 1;
 
     file = OpenOptionsFile(&path);
     if (file == NULL) {
-        DebugLog("Options: options.cfg not found; skip_intros=0");
+        DebugLog("Options: options.cfg not found; skip_intros=0 show_fps=1");
         return;
     }
     DebugLog("Options: reading %s", path);
@@ -102,14 +104,23 @@ void JA2OptionsLoad(void)
         if (EqualIgnoreCase(key, "skip_intros")) {
             gSkipIntros = ParseBoolean(value);
             DebugLog("Options: skip_intros=%d", gSkipIntros);
+        } else if (EqualIgnoreCase(key, "show_fps")) {
+            gShowFPS = ParseBoolean(value);
+            DebugLog("Options: show_fps=%d", gShowFPS);
         }
     }
     fclose(file);
-    DebugLog("Options: loaded skip_intros=%d", gSkipIntros);
+    DebugLog("Options: loaded skip_intros=%d show_fps=%d", gSkipIntros, gShowFPS);
 }
 
 Boolean JA2OptionsSkipIntros(void)
 {
     JA2OptionsLoad();
     return gSkipIntros;
+}
+
+Boolean JA2OptionsShowFPS(void)
+{
+    JA2OptionsLoad();
+    return gShowFPS;
 }

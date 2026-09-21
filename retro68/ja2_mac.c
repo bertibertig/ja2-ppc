@@ -65,6 +65,10 @@ static short gCursorWidth;
 static short gCursorHeight;
 static int gLastMouseX = -1;
 static int gLastMouseY = -1;
+static Boolean gMouseMotionNeedsPresent;
+static Uint32 gFPSTicks;
+static unsigned long gFPSFrames;
+static unsigned short gFPSValue;
 
 short gMenuScreen = MENU_SCREEN_MAIN;
 void RestoreMainMenu(void);
@@ -890,7 +894,8 @@ Boolean JA2RenderInterfaceButton(SDL_Surface *destination, short objectIndex,
     return 1;
 }
 
-Boolean JA2InstallNormalCursor(void)
+static Boolean InstallCursorAsset(const char *archiveName, const char *entryName,
+                                  const char *label)
 {
     JA2SLFArchive *archive;
     unsigned char *fileData;
@@ -909,17 +914,17 @@ Boolean JA2InstallNormalCursor(void)
     unsigned short run;
     unsigned char control;
 
-    archive = JA2SLFOpen("Cursors.slf");
-    if (archive == NULL || !JA2SLFFind(archive, "CURSOR.STI", &fileOffset, &fileLength)) {
+    archive = JA2SLFOpen(archiveName);
+    if (archive == NULL || !JA2SLFFind(archive, entryName, &fileOffset, &fileLength)) {
         if (archive != NULL) JA2SLFClose(archive);
-        DebugLog("Cursor loader: CURSOR.STI unavailable");
+        DebugLog("Cursor loader: %s unavailable in %s", entryName, archiveName);
         return 0;
     }
     fileData = (unsigned char *)malloc(fileLength);
     if (fileData == NULL || !JA2SLFRead(archive, fileOffset, fileData, fileLength)) {
         free(fileData);
         JA2SLFClose(archive);
-        DebugLog("Cursor loader: cannot read CURSOR.STI length=%lu", fileLength);
+        DebugLog("Cursor loader: cannot read %s length=%lu", entryName, fileLength);
         return 0;
     }
     JA2SLFClose(archive);
@@ -929,7 +934,7 @@ Boolean JA2InstallNormalCursor(void)
         ReadLittleEndian32(&fileData[24]) != 256 ||
         fileLength < 64 + 768 + (unsigned long)objectCount * 16 + storedSize) {
         free(fileData);
-        DebugLog("Cursor loader: invalid CURSOR.STI object count=%u", objectCount);
+        DebugLog("Cursor loader: invalid %s object count=%u", entryName, objectCount);
         return 0;
     }
     {
@@ -991,8 +996,18 @@ Boolean JA2InstallNormalCursor(void)
         }
     }
     free(fileData);
-    DebugLog("Cursor loader: installed CURSOR.STI normal cursor size=%ux%u", width, height);
+    DebugLog("Cursor loader: installed %s size=%ux%u", label, width, height);
     return 1;
+}
+
+Boolean JA2InstallNormalCursor(void)
+{
+    return InstallCursorAsset("Cursors.slf", "CURSOR.STI", "normal cursor");
+}
+
+Boolean JA2InstallLaptopCursor(void)
+{
+    return InstallCursorAsset("Laptop.slf", "LAPTOPCURSOR.STI", "laptop cursor");
 }
 
 static Boolean EnsurePresentSurface(void)
@@ -1064,6 +1079,25 @@ static void DrawCursorOverlay(SDL_Surface *destination)
     }
 }
 
+static void DrawFPSCounter(SDL_Surface *destination)
+{
+    Uint32 now;
+    char text[24];
+
+    if (!JA2OptionsShowFPS() || destination == NULL) return;
+    now = SDL_GetTicks();
+    if (gFPSTicks == 0) gFPSTicks = now;
+    ++gFPSFrames;
+    if (now - gFPSTicks >= 1000) {
+        gFPSValue = (unsigned short)((gFPSFrames * 1000) / (now - gFPSTicks));
+        gFPSFrames = 0;
+        gFPSTicks = now;
+        DebugLog("Performance: fps=%u", gFPSValue);
+    }
+    sprintf(text, "FPS: %u", gFPSValue);
+    JA2DrawText(destination, 4, 3, text, JA2_COLOR_RED, 12);
+}
+
 void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
 {
     SDL_Surface *windowSurface;
@@ -1083,6 +1117,7 @@ void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
         DebugLog("Renderer: %s RGB555 present copy failed: %s", name, SDL_GetError());
         return;
     }
+    DrawFPSCounter(gPresentSurface);
     DrawCursorOverlay(gPresentSurface);
     if (SDL_BlitSurface(gPresentSurface, NULL, windowSurface, NULL) != 0) {
         DebugLog("Renderer: %s SDL_BlitSurface failed: %s", name, SDL_GetError());
@@ -1742,6 +1777,11 @@ static void HandleJA2Event(const SDL_Event *event)
         }
         break;
     }
+    case SDL_MOUSEMOTION:
+        gLastMouseX = event->motion.x;
+        gLastMouseY = event->motion.y;
+        gMouseMotionNeedsPresent = 1;
+        break;
     case SDL_MOUSEBUTTONDOWN: {
         int localX = event->button.x;
         int localY = event->button.y;
@@ -1797,9 +1837,10 @@ static void UpdateCursorPresentIfMoved(void)
         return;
     }
     SDL_GetMouseState(&mouseX, &mouseY);
-    if (mouseX != gLastMouseX || mouseY != gLastMouseY) {
+    if (gMouseMotionNeedsPresent || mouseX != gLastMouseX || mouseY != gLastMouseY) {
         gLastMouseX = mouseX;
         gLastMouseY = mouseY;
+        gMouseMotionNeedsPresent = 0;
         PresentCurrentScreen();
     }
 }

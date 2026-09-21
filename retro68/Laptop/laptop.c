@@ -535,7 +535,12 @@ static Boolean ReadHelpTextRecord(short record, char *output, short outputSize)
         unsigned short character = ReadLE16(gLaptopHelpTextData + offset + index * 2);
         if (character == 0) break;
         if (character > 33) --character;
-        if (character == '\r' || character == '\n') {
+        if (character == 177) {
+            output[out++] = '\n';
+            if (out < outputSize - 1) output[out++] = '\n';
+        } else if (character == 178 || character == 179) {
+            continue;
+        } else if (character == '\r' || character == '\n') {
             output[out++] = '\n';
         } else if (character < 256) {
             output[out++] = (char)character;
@@ -562,19 +567,23 @@ static short DrawHelpTextWrapped(SDL_Surface *surface, short x, short y,
             const char *wordEnd = cursor;
             short wordLength;
             short candidateLength;
+            char candidate[256];
             while (*wordEnd != 0 && *wordEnd != ' ' && *wordEnd != '\n') ++wordEnd;
             wordLength = (short)(wordEnd - cursor);
             candidateLength = (short)(lineLength + wordLength + (lineLength ? 1 : 0));
             if (candidateLength >= sizeof(line)) break;
-            memcpy(line + lineLength + (lineLength ? 1 : 0), cursor, wordLength);
-            line[candidateLength] = 0;
-            if (lineLength != 0 && LaptopTextWidth(line) > width) {
+            memcpy(candidate, line, lineLength);
+            if (lineLength) candidate[lineLength++] = ' ';
+            memcpy(candidate + lineLength, cursor, wordLength);
+            candidate[candidateLength] = 0;
+            if (lineLength != 0 && LaptopTextWidth(candidate) > width) {
                 line[lineLength] = 0;
                 DrawLaptopTextLine(surface, x, lineY, line, color);
                 lineY = (short)(lineY + 12);
                 lineLength = 0;
                 continue;
             }
+            memcpy(line, candidate, candidateLength + 1);
             lineLength = candidateLength;
             cursor = wordEnd;
             while (*cursor == ' ') ++cursor;
@@ -845,6 +854,7 @@ Boolean JA2LaptopRender(void)
         gLaptopWelcomeVisible = 1;
         gLaptopHideHelp = 0;
         gLaptopHelpPage = 0;
+        JA2InstallLaptopCursor();
         JA2LaptopMusicStart();
         DebugLog("Laptop: entered original-coordinate SDL2 screen welcomeVisible=1");
     }
@@ -883,6 +893,7 @@ void JA2LaptopHandleClick(short x, short y)
     if (x >= 29 && x < 150 && y >= 371 && y < 430) {
         DebugLog("Laptop: close requested; returning to main menu placeholder");
         JA2LaptopShutdown();
+        JA2InstallNormalCursor();
         JA2MenuMusicStart();
         RestoreMainMenu();
     }
@@ -897,6 +908,7 @@ void JA2LaptopHandleKey(SDL_Keycode key)
             DebugLog("Laptop: welcome overlay closed by Escape");
         } else {
             JA2LaptopShutdown();
+            JA2InstallNormalCursor();
             JA2MenuMusicStart();
             RestoreMainMenu();
         }
