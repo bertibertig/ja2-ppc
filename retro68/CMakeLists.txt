@@ -33,6 +33,8 @@ add_application(JA2PPC
     ja2_game_init_options.h
     ja2_options.c
     ja2_options.h
+    Laptop/laptop.c
+    Laptop/laptop.h
     ja2_new_game_init.c
     ja2_new_game_init.h
     ja2/Build/Utils/Cinematics.c

@@ -69,14 +69,19 @@ on x86 struct layout and reports the number of valid indexed entries.
 ## New Game test slice
 
 In the German debug build, select `Neues Spiel` from the main menu. The PPC
-shell now follows the first-run branch of the original `InitNewGame(FALSE)`
-flow through its `LAPTOP_SCREEN` transition: it records the laptop and
-strategic initialization boundary, queues the five opening emails, selects
-medium difficulty with 35,000 starting cash, selects A9 Omerta, sets the
-screen-count transition to 1, and marks the campaign started. The Laptop
-placeholder displays these values as a testable result. The actual laptop and
-strategic subsystems remain future migration work and are explicitly reported
-as such in the diagnostics and placeholder screen.
+shell follows the first-run branch of the original `InitNewGame(FALSE)` flow
+through its `LAPTOP_SCREEN` transition: it records the laptop and strategic
+initialization boundary, queues the five opening emails, selects medium
+difficulty with 35,000 starting cash, selects A9 Omerta, sets the screen-count
+transition to 1, and marks the campaign started. The first Laptop slice now
+composes the SDL2 RGB555 screen from the original `Laptop.slf` and
+`Interface.slf` assets using the original 640x480 coordinates. It
+shows the laptop frame, desktop, taskbar, navigation buttons, lights, status
+values, and the initial Welcome help overlay without the legacy FPS counter.
+
+The laptop program pages, email records, strategic subsystem, and full original
+help text database remain future migration work. The active boundary and asset
+fallbacks are explicitly reported in the diagnostics.
 
 The debug build writes `JA2PPC-Debug.log` beside the application and mirrors
 the messages in the `JA2 Debug` window. For a New Game failure, capture the

@@ -1523,30 +1523,8 @@ static void DrawMenuActionScreen(void)
     if (!EnsureMenuSurface()) return;
 
     if (gMenuScreen == MENU_SCREEN_LAPTOP) {
-        DebugLog("Laptop: rendering SDL2 placeholder state=%d gameStarted=%d "
-                 "screenCount=%d pendingScreen=%d cash=%ld emails=%d sector=%d,%d",
-                 gNewGameState, gNewGameGameStarted, gNewGameScreenCount,
-                 gNewGamePendingScreen, gNewGameStartingCash,
-                 gNewGameOpeningEmails, gNewGameSectorX, gNewGameSectorY);
-        SDL_FillRect(gMenuSurface, NULL, JA2_RGB555(18, 22, 34));
-        JA2DrawText(gMenuSurface, 60, 110, "Laptop", JA2_COLOR_ACCENT, 24);
-        DrawCString(gMenuSurface, 60, 160,
-                    "InitNewGame(FALSE) ist bis zum Laptop-Uebergang ausgefuehrt.",
-                    JA2_COLOR_WHITE);
-        DrawCString(gMenuSurface, 60, 190,
-                    "Laptop- und Strategic-Subsystem folgen als separater PPC-Port.",
-                    JA2_COLOR_WHITE);
-        sprintf(status, "Startkapital: %ld   Eroeffnungs-E-Mails: %d",
-                gNewGameStartingCash, gNewGameOpeningEmails);
-        DrawCString(gMenuSurface, 60, 230, status, JA2_COLOR_WHITE);
-        sprintf(status, "Startsektor: A9 Omerta (%d,%d,0)",
-                gNewGameSectorX, gNewGameSectorY);
-        DrawCString(gMenuSurface, 60, 252, status, JA2_COLOR_WHITE);
-        DrawCString(gMenuSurface, 60, 292,
-                    "PPC-Grenze: InitLaptopAndLaptopScreens / InitStrategicLayer",
-                    JA2_COLOR_ACCENT);
-        DrawCString(gMenuSurface, 60, 340, "ESC: Zurueck zum Hauptmenue", JA2_COLOR_WHITE);
-        JA2BlitMenuBackground();
+        (void)status;
+        JA2LaptopRender();
         return;
     }
 
@@ -1747,7 +1725,9 @@ static void HandleJA2Event(const SDL_Event *event)
 
         DebugLog("Input: keyDown key=%d screen=%d startup=%d",
                  (int)key, gMenuScreen, gStartupActive);
-        if (gMenuScreen == MENU_SCREEN_INTRO && (key == SDLK_ESCAPE || key == SDLK_SPACE)) {
+        if (gMenuScreen == MENU_SCREEN_LAPTOP) {
+            JA2LaptopHandleKey(key);
+        } else if (gMenuScreen == MENU_SCREEN_INTRO && (key == SDLK_ESCAPE || key == SDLK_SPACE)) {
             JA2PPCIntroSkip();
         } else if (gMenuScreen == MENU_SCREEN_DIFFICULTY && key == SDLK_RETURN) {
             JA2HandleDifficultyClick(200, 430);
@@ -1768,7 +1748,9 @@ static void HandleJA2Event(const SDL_Event *event)
 
         DebugLog("Input: content click local=%d,%d screen=%d startup=%d",
                  localX, localY, gMenuScreen, gStartupActive);
-        if (!gStartupActive && gMenuScreen == MENU_SCREEN_INTRO) {
+        if (!gStartupActive && gMenuScreen == MENU_SCREEN_LAPTOP) {
+            JA2LaptopHandleClick((short)localX, (short)localY);
+        } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_INTRO) {
             JA2PPCIntroSkip();
         } else if (!gStartupActive && gMenuScreen == MENU_SCREEN_MAIN) {
             HandleMainMenuClick(localX, localY);
@@ -1911,6 +1893,7 @@ int main(int argc, char *argv[])
         gPresentSurface = NULL;
     }
     JA2TextShutdown();
+    JA2LaptopShutdown();
     JA2PPCIntroShutdown();
     JA2PPCVideoShutdown();
     JA2MenuMusicShutdown();
