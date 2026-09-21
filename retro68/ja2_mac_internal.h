@@ -74,6 +74,7 @@ void JA2PPCIntroShutdown(void);
 void JA2PPCVideoShutdown(void);
 Boolean JA2LaptopRender(void);
 void JA2LaptopHandleClick(short x, short y);
+void JA2LaptopHandleWheel(short direction);
 void JA2LaptopHandleKey(SDL_Keycode key);
 void JA2LaptopShutdown(void);
 Boolean JA2RenderInterfaceButton(SDL_Surface *destination, short objectIndex,

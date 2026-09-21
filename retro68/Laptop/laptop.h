@@ -6,6 +6,7 @@
 
 Boolean JA2LaptopRender(void);
 void JA2LaptopHandleClick(short x, short y);
+void JA2LaptopHandleWheel(short direction);
 void JA2LaptopHandleKey(SDL_Keycode key);
 void JA2LaptopShutdown(void);
 

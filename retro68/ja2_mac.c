@@ -1782,6 +1782,11 @@ static void HandleJA2Event(const SDL_Event *event)
         gLastMouseY = event->motion.y;
         gMouseMotionNeedsPresent = 1;
         break;
+    case SDL_MOUSEWHEEL:
+        if (gMenuScreen == MENU_SCREEN_LAPTOP) {
+            JA2LaptopHandleWheel((short)event->wheel.y);
+        }
+        break;
     case SDL_MOUSEBUTTONDOWN: {
         int localX = event->button.x;
         int localY = event->button.y;

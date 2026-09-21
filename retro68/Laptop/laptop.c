@@ -20,12 +20,23 @@
 #define LAPTOP_HELP_Y 81
 #define LAPTOP_HELP_WIDTH 412
 #define LAPTOP_HELP_HEIGHT 292
+#define LAPTOP_HELP_TEXT_X (LAPTOP_HELP_X + 107)
+#define LAPTOP_HELP_TEXT_Y (LAPTOP_HELP_Y + 48)
+#define LAPTOP_HELP_TEXT_WIDTH 270
+#define LAPTOP_HELP_TEXT_HEIGHT 228
+#define LAPTOP_HELP_SCROLL_X (LAPTOP_HELP_X + 92 + 292)
+#define LAPTOP_HELP_SCROLL_Y (LAPTOP_HELP_Y + 63)
+#define LAPTOP_HELP_SCROLL_HEIGHT 182
+#define LAPTOP_HELP_UP_Y (LAPTOP_HELP_Y + 43)
+#define LAPTOP_HELP_DOWN_Y (LAPTOP_HELP_Y + 245)
 
 static SDL_Surface *gLaptopBaseSurface;
 static SDL_Surface *gLaptopHelpArtSurface;
 static SDL_Surface *gLaptopHelpButtonNormal;
 static SDL_Surface *gLaptopHelpButtonSelected;
 static SDL_Surface *gLaptopHelpExit;
+static SDL_Surface *gLaptopHelpArrowUp;
+static SDL_Surface *gLaptopHelpArrowDown;
 static unsigned char *gLaptopFontData;
 static unsigned long gLaptopFontLength;
 static unsigned long gLaptopFontStoredSize;
@@ -40,6 +51,11 @@ static Boolean gLaptopEntered;
 static Boolean gLaptopWelcomeVisible;
 static Boolean gLaptopHideHelp;
 static short gLaptopHelpPage;
+static short gLaptopHelpScrollOffset;
+static short gLaptopHelpTotalLines;
+static Boolean gLaptopTextClipEnabled;
+static short gLaptopTextClipTop;
+static short gLaptopTextClipBottom;
 
 static unsigned short ReadLE16(const unsigned char *bytes)
 {
@@ -59,6 +75,10 @@ static void WritePixel(SDL_Surface *surface, short x, short y, Uint16 color)
     Uint16 *row;
 
     if (surface == NULL || x < 0 || y < 0 || x >= surface->w || y >= surface->h) {
+        return;
+    }
+    if (gLaptopTextClipEnabled &&
+        (y < gLaptopTextClipTop || y >= gLaptopTextClipBottom)) {
         return;
     }
     row = (Uint16 *)((Uint8 *)surface->pixels + (long)y * surface->pitch);
@@ -626,8 +646,13 @@ static Boolean PrepareLaptopHelpAssets(void)
         0, 77, 22, 16, SDL_PIXELFORMAT_RGB555);
     gLaptopHelpExit = SDL_CreateRGBSurfaceWithFormat(
         0, 22, 22, 16, SDL_PIXELFORMAT_RGB555);
+    gLaptopHelpArrowUp = SDL_CreateRGBSurfaceWithFormat(
+        0, 20, 20, 16, SDL_PIXELFORMAT_RGB555);
+    gLaptopHelpArrowDown = SDL_CreateRGBSurfaceWithFormat(
+        0, 20, 20, 16, SDL_PIXELFORMAT_RGB555);
     if (gLaptopHelpArtSurface == NULL || gLaptopHelpButtonNormal == NULL ||
-        gLaptopHelpButtonSelected == NULL || gLaptopHelpExit == NULL) {
+        gLaptopHelpButtonSelected == NULL || gLaptopHelpExit == NULL ||
+        gLaptopHelpArrowUp == NULL || gLaptopHelpArrowDown == NULL) {
         DebugLog("Laptop help: SDL2 asset surface allocation failed");
         return 0;
     }
@@ -635,7 +660,9 @@ static Boolean PrepareLaptopHelpAssets(void)
         !DrawStiObject(gLaptopHelpArtSurface, "Interface.slf", "HelpScreen.sti", 9, 92, 0) ||
         !DrawStiObject(gLaptopHelpButtonNormal, "Interface.slf", "HelpScreen.sti", 1, 0, 0) ||
         !DrawStiObject(gLaptopHelpButtonSelected, "Interface.slf", "HelpScreen.sti", 3, 0, 0) ||
-        !DrawStiObject(gLaptopHelpExit, "Interface.slf", "HelpScreen.sti", 0, 0, 0)) {
+        !DrawStiObject(gLaptopHelpExit, "Interface.slf", "HelpScreen.sti", 0, 0, 0) ||
+        !DrawStiObject(gLaptopHelpArrowUp, "Interface.slf", "HelpScreen.sti", 10, 0, 0) ||
+        !DrawStiObject(gLaptopHelpArrowDown, "Interface.slf", "HelpScreen.sti", 15, 0, 0)) {
         DebugLog("Laptop help: failed to cache HelpScreen.sti objects");
         return 0;
     }
@@ -733,22 +760,30 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
         DrawLaptopTextLine(surface, textX, (short)(buttonY + 6), buttonLabel,
                            JA2_COLOR_WHITE);
     }
+    gLaptopHelpTotalLines = 0;
     if (exactText) {
         short textY;
         DrawLaptopTitleLine(surface, (short)(LAPTOP_HELP_X + 107),
                             (short)(LAPTOP_HELP_Y + 7), title, JA2_COLOR_WHITE);
         DrawLaptopTitleLine(surface, (short)(LAPTOP_HELP_X + 107),
                             (short)(LAPTOP_HELP_Y + 22), subtitle, JA2_COLOR_WHITE);
-        textY = (short)(LAPTOP_HELP_Y + 48);
+        textY = (short)(LAPTOP_HELP_TEXT_Y - gLaptopHelpScrollOffset * 12);
+        gLaptopTextClipEnabled = 1;
+        gLaptopTextClipTop = LAPTOP_HELP_TEXT_Y;
+        gLaptopTextClipBottom = LAPTOP_HELP_TEXT_Y + LAPTOP_HELP_TEXT_HEIGHT;
         for (index = 0; index < 15 && bodyRecords[gLaptopHelpPage][index] >= 0;
              ++index) {
             char paragraph[512];
             if (ReadHelpTextRecord(bodyRecords[gLaptopHelpPage][index],
                                    paragraph, sizeof(paragraph))) {
-                textY = DrawHelpTextWrapped(surface, (short)(LAPTOP_HELP_X + 107),
-                                            textY, 270, paragraph, JA2_COLOR_WHITE);
+                    textY = DrawHelpTextWrapped(surface, LAPTOP_HELP_TEXT_X,
+                                                textY, LAPTOP_HELP_TEXT_WIDTH,
+                                                paragraph, JA2_COLOR_WHITE);
+                }
             }
-        }
+        gLaptopTextClipEnabled = 0;
+        gLaptopHelpTotalLines = (short)((textY + gLaptopHelpScrollOffset * 12 -
+                                         LAPTOP_HELP_TEXT_Y + 11) / 12);
     } else {
         DrawLaptopTitleLine(surface, (short)(LAPTOP_HELP_X + 107),
                             (short)(LAPTOP_HELP_Y + 7),
@@ -758,10 +793,40 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
                             (short)(LAPTOP_HELP_Y + 22),
                             "(Druecken Sie H, um jederzeit Hilfe aufzurufen)",
                             JA2_COLOR_WHITE);
+        gLaptopTextClipEnabled = 1;
+        gLaptopTextClipTop = LAPTOP_HELP_TEXT_Y;
+        gLaptopTextClipBottom = LAPTOP_HELP_TEXT_Y + LAPTOP_HELP_TEXT_HEIGHT;
         for (index = 0; index < 4 && pageBody[gLaptopHelpPage][index] != NULL; ++index) {
-            DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 107),
-                               (short)(LAPTOP_HELP_Y + 48 + index * 15),
+            DrawLaptopTextLine(surface, LAPTOP_HELP_TEXT_X,
+                               (short)(LAPTOP_HELP_TEXT_Y + index * 15),
                                pageBody[gLaptopHelpPage][index], JA2_COLOR_WHITE);
+        }
+        gLaptopTextClipEnabled = 0;
+        gLaptopHelpTotalLines = (short)(index * 2);
+    }
+    if (gLaptopHelpTotalLines > LAPTOP_HELP_TEXT_HEIGHT / 12) {
+        short visibleLines = LAPTOP_HELP_TEXT_HEIGHT / 12;
+        short thumbHeight = (short)(LAPTOP_HELP_SCROLL_HEIGHT * visibleLines /
+                                    gLaptopHelpTotalLines);
+        short maxOffset = (short)(gLaptopHelpTotalLines - visibleLines);
+        short thumbY;
+        if (thumbHeight < 12) thumbHeight = 12;
+        thumbY = (short)(LAPTOP_HELP_SCROLL_Y +
+            (LAPTOP_HELP_SCROLL_HEIGHT - thumbHeight) * gLaptopHelpScrollOffset /
+            (maxOffset == 0 ? 1 : maxOffset));
+        FillRectRGB555(surface, LAPTOP_HELP_SCROLL_X, thumbY,
+                       (short)(LAPTOP_HELP_SCROLL_X + 20),
+                       (short)(thumbY + thumbHeight), JA2_COLOR_ACCENT);
+        FrameRectRGB555(surface, LAPTOP_HELP_SCROLL_X, thumbY,
+                        (short)(LAPTOP_HELP_SCROLL_X + 20),
+                        (short)(thumbY + thumbHeight), JA2_COLOR_WHITE);
+        if (gLaptopHelpArrowUp != NULL) {
+            SDL_Rect destination = { LAPTOP_HELP_SCROLL_X, LAPTOP_HELP_UP_Y, 0, 0 };
+            SDL_BlitSurface(gLaptopHelpArrowUp, NULL, surface, &destination);
+        }
+        if (gLaptopHelpArrowDown != NULL) {
+            SDL_Rect destination = { LAPTOP_HELP_SCROLL_X, LAPTOP_HELP_DOWN_Y, 0, 0 };
+            SDL_BlitSurface(gLaptopHelpArrowDown, NULL, surface, &destination);
         }
     }
     FillRectRGB555(surface, (short)(LAPTOP_HELP_X + 92 + 4),
@@ -794,6 +859,24 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
         SDL_Rect destination = { (short)(LAPTOP_HELP_X + 92 + 291),
                                  (short)(LAPTOP_HELP_Y + 9), 0, 0 };
         SDL_BlitSurface(gLaptopHelpExit, NULL, surface, &destination);
+    }
+}
+
+static void ScrollLaptopHelp(short amount)
+{
+    short visibleLines = LAPTOP_HELP_TEXT_HEIGHT / 12;
+    short maxOffset = (short)(gLaptopHelpTotalLines - visibleLines);
+    short nextOffset;
+
+    if (maxOffset <= 0) return;
+    nextOffset = (short)(gLaptopHelpScrollOffset + amount);
+    if (nextOffset < 0) nextOffset = 0;
+    if (nextOffset > maxOffset) nextOffset = maxOffset;
+    if (nextOffset != gLaptopHelpScrollOffset) {
+        gLaptopHelpScrollOffset = nextOffset;
+        DebugLog("Laptop: help scroll offset=%d/%d", gLaptopHelpScrollOffset,
+                 maxOffset);
+        JA2LaptopRender();
     }
 }
 
@@ -854,6 +937,7 @@ Boolean JA2LaptopRender(void)
         gLaptopWelcomeVisible = 1;
         gLaptopHideHelp = 0;
         gLaptopHelpPage = 0;
+        gLaptopHelpScrollOffset = 0;
         JA2InstallLaptopCursor();
         JA2LaptopMusicStart();
         DebugLog("Laptop: entered original-coordinate SDL2 screen welcomeVisible=1");
@@ -879,8 +963,28 @@ void JA2LaptopHandleClick(short x, short y)
         } else if (x >= LAPTOP_HELP_X + 11 && x < LAPTOP_HELP_X + 11 + 77 &&
                    y >= LAPTOP_HELP_Y + 12 && y < LAPTOP_HELP_Y + 12 + 8 * 30) {
             gLaptopHelpPage = (short)((y - LAPTOP_HELP_Y - 12) / 30);
+            gLaptopHelpScrollOffset = 0;
             DebugLog("Laptop: help page selected=%d", gLaptopHelpPage);
             JA2LaptopRender();
+        } else if (x >= LAPTOP_HELP_SCROLL_X && x < LAPTOP_HELP_SCROLL_X + 20 &&
+                   y >= LAPTOP_HELP_UP_Y && y < LAPTOP_HELP_UP_Y + 20) {
+            ScrollLaptopHelp(-1);
+        } else if (x >= LAPTOP_HELP_SCROLL_X && x < LAPTOP_HELP_SCROLL_X + 20 &&
+                   y >= LAPTOP_HELP_DOWN_Y && y < LAPTOP_HELP_DOWN_Y + 20) {
+            ScrollLaptopHelp(1);
+        } else if (x >= LAPTOP_HELP_SCROLL_X && x < LAPTOP_HELP_SCROLL_X + 20 &&
+                   y >= LAPTOP_HELP_SCROLL_Y && y < LAPTOP_HELP_SCROLL_Y + LAPTOP_HELP_SCROLL_HEIGHT) {
+            short visibleLines = LAPTOP_HELP_TEXT_HEIGHT / 12;
+            short maxOffset = (short)(gLaptopHelpTotalLines - visibleLines);
+            short relative = (short)(y - LAPTOP_HELP_SCROLL_Y);
+            if (maxOffset > 0) {
+                gLaptopHelpScrollOffset = (short)(relative * maxOffset /
+                                                  LAPTOP_HELP_SCROLL_HEIGHT);
+                if (gLaptopHelpScrollOffset > maxOffset) {
+                    gLaptopHelpScrollOffset = maxOffset;
+                }
+                JA2LaptopRender();
+            }
         } else if (x >= LAPTOP_HELP_X + 92 + 4 && x < LAPTOP_HELP_X + 92 + 21 &&
                    y >= LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 - 3 &&
                    y < LAPTOP_HELP_Y + LAPTOP_HELP_HEIGHT - 18 + 14) {
@@ -896,6 +1000,13 @@ void JA2LaptopHandleClick(short x, short y)
         JA2InstallNormalCursor();
         JA2MenuMusicStart();
         RestoreMainMenu();
+    }
+}
+
+void JA2LaptopHandleWheel(short direction)
+{
+    if (gLaptopWelcomeVisible) {
+        ScrollLaptopHelp(direction > 0 ? -1 : 1);
     }
 }
 
