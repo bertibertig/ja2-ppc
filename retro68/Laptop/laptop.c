@@ -1,6 +1,7 @@
 #include "laptop.h"
 
 #include "../ja2_mac_internal.h"
+#include "../ja2_music.h"
 #include "../ja2_ppc_text.h"
 #include "../ja2_slf.h"
 
@@ -21,6 +22,10 @@
 #define LAPTOP_HELP_HEIGHT 292
 
 static SDL_Surface *gLaptopBaseSurface;
+static unsigned char *gLaptopFontData;
+static unsigned long gLaptopFontLength;
+static unsigned long gLaptopFontStoredSize;
+static unsigned short gLaptopFontObjectCount;
 static Boolean gLaptopEntered;
 static Boolean gLaptopWelcomeVisible;
 
@@ -283,22 +288,181 @@ static Boolean DrawPcx(SDL_Surface *destination, const char *archiveName,
     return 1;
 }
 
+static Boolean LoadLaptopFont(void)
+{
+    if (gLaptopFontData != NULL) {
+        return 1;
+    }
+    if (!ReadArchiveEntry("Fonts.slf", "FONT10ARIAL.sti", &gLaptopFontData,
+                          &gLaptopFontLength)) {
+        DebugLog("Laptop font: FONT10ARIAL.sti unavailable; using fallback text");
+        return 0;
+    }
+    if (gLaptopFontLength < 64 + 768 + 16 ||
+        memcmp(gLaptopFontData, "STCI", 4) != 0 ||
+        !(ReadLE32(&gLaptopFontData[16]) & 0x0008) ||
+        !(ReadLE32(&gLaptopFontData[16]) & 0x0020) ||
+        ReadLE32(&gLaptopFontData[24]) != 256) {
+        DebugLog("Laptop font: invalid FONT10ARIAL.sti header");
+        free(gLaptopFontData);
+        gLaptopFontData = NULL;
+        return 0;
+    }
+    gLaptopFontStoredSize = ReadLE32(&gLaptopFontData[8]);
+    gLaptopFontObjectCount = ReadLE16(&gLaptopFontData[28]);
+    if (gLaptopFontObjectCount == 0 ||
+        gLaptopFontLength < 64 + 768 +
+            (unsigned long)gLaptopFontObjectCount * 16 + gLaptopFontStoredSize) {
+        DebugLog("Laptop font: invalid FONT10ARIAL.sti object table");
+        free(gLaptopFontData);
+        gLaptopFontData = NULL;
+        return 0;
+    }
+    DebugLog("Laptop font: loaded FONT10ARIAL.sti objects=%u", gLaptopFontObjectCount);
+    return 1;
+}
+
+static unsigned short LaptopFontIndex(unsigned char character)
+{
+    if (character >= 'A' && character <= 'Z') return (unsigned short)(character - 'A');
+    if (character >= 'a' && character <= 'z') return (unsigned short)(26 + character - 'a');
+    if (character >= '0' && character <= '9') return (unsigned short)(52 + character - '0');
+    switch (character) {
+    case '!': return 62;
+    case '@': return 63;
+    case '#': return 64;
+    case '$': return 65;
+    case '%': return 66;
+    case '^': return 67;
+    case '&': return 68;
+    case '*': return 69;
+    case '(': return 70;
+    case ')': return 71;
+    case '-': return 72;
+    case '_': return 73;
+    case '+': return 74;
+    case '=': return 75;
+    case '|': return 76;
+    case '\\': return 77;
+    case '{': return 78;
+    case '}': return 79;
+    case '[': return 80;
+    case ']': return 81;
+    case ':': return 82;
+    case ';': return 83;
+    case '"': return 84;
+    case '\'': return 85;
+    case '<': return 86;
+    case '>': return 87;
+    case ',': return 88;
+    case '.': return 89;
+    case '?': return 90;
+    case '/': return 91;
+    case ' ': return 92;
+    default: return 0;
+    }
+}
+
+static void DrawLaptopTextLine(SDL_Surface *surface, short x, short y,
+                               const char *text, Uint16 color)
+{
+    const unsigned char *pixels;
+    short cursorX = x;
+    const unsigned char *character;
+
+    if (!LoadLaptopFont()) {
+        JA2DrawText(surface, x, y, text, color, 9);
+        return;
+    }
+    pixels = gLaptopFontData + 64 + 768 +
+             (unsigned long)gLaptopFontObjectCount * 16;
+    if (SDL_MUSTLOCK(surface)) {
+        SDL_LockSurface(surface);
+    }
+    while (*text != 0) {
+        unsigned short objectIndex = LaptopFontIndex((unsigned char)*text++);
+        unsigned long dataOffset;
+        unsigned long dataLength;
+        unsigned short width;
+        unsigned short height;
+        unsigned short row;
+        unsigned short column;
+        unsigned short run;
+        unsigned char control;
+        unsigned char *source;
+        short offsetX;
+        short offsetY;
+
+        if (objectIndex >= gLaptopFontObjectCount) objectIndex = 0;
+        character = gLaptopFontData + 64 + 768 +
+                    (unsigned long)objectIndex * 16;
+        dataOffset = ReadLE32(&character[0]);
+        dataLength = ReadLE32(&character[4]);
+        offsetX = (short)ReadLE16(&character[8]);
+        offsetY = (short)ReadLE16(&character[10]);
+        height = ReadLE16(&character[12]);
+        width = ReadLE16(&character[14]);
+        if (width == 0 || height == 0 || dataOffset > gLaptopFontStoredSize ||
+            dataLength > gLaptopFontStoredSize - dataOffset) {
+            cursorX = (short)(cursorX + 4);
+            continue;
+        }
+        source = (unsigned char *)(pixels + dataOffset);
+        for (row = 0; row < height; ++row) {
+            column = 0;
+            while (column < width &&
+                   (unsigned long)(source - (pixels + dataOffset)) < dataLength) {
+                control = *source++;
+                if (control == 0) {
+                    break;
+                }
+                run = (unsigned short)(control & 0x7f);
+                if (run == 0 || column + run > width) {
+                    break;
+                }
+                if (control & 0x80) {
+                    column = (unsigned short)(column + run);
+                } else {
+                    if ((unsigned long)(source - (pixels + dataOffset)) + run > dataLength) {
+                        break;
+                    }
+                    while (run-- != 0) {
+                        WritePixel(surface, (short)(cursorX + offsetX + column),
+                                   (short)(y + offsetY + row), color);
+                        ++column;
+                        ++source;
+                    }
+                }
+            }
+            if (column == width &&
+                (unsigned long)(source - (pixels + dataOffset)) < dataLength &&
+                *source == 0) {
+                ++source;
+            }
+        }
+        cursorX = (short)(cursorX + width + 1);
+    }
+    if (SDL_MUSTLOCK(surface)) {
+        SDL_UnlockSurface(surface);
+    }
+}
+
 static void DrawLaptopText(SDL_Surface *surface)
 {
-    DrawCString(surface, 59, 98, "E-mail", JA2_COLOR_BLACK);
-    DrawCString(surface, 59, 130, "Web", JA2_COLOR_BLACK);
-    DrawCString(surface, 59, 162, "Dateien", JA2_COLOR_BLACK);
-    DrawCString(surface, 59, 194, "Logbuch", JA2_COLOR_BLACK);
-    DrawCString(surface, 59, 226, "Personal", JA2_COLOR_BLACK);
-    DrawCString(surface, 59, 273, "Finanzen", JA2_COLOR_BLACK);
-    DrawCString(surface, 52, 402, "Schliessen", JA2_COLOR_BLACK);
-    DrawCString(surface, 47, 224, "Soeldner: 0", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 98, "E-mail", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 130, "Web", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 162, "Dateien", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 194, "Logbuch", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 226, "Personal", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 59, 273, "Finanzen", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 52, 402, "Schliessen", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 47, 224, "Soeldner: 0", JA2_COLOR_BLACK);
     {
         char balance[32];
         sprintf(balance, "$%ld", gNewGameStartingCash);
-        DrawCString(surface, 47, 272, balance, JA2_COLOR_BLACK);
+        DrawLaptopTextLine(surface, 47, 272, balance, JA2_COLOR_BLACK);
     }
-    DrawCString(surface, 35, 433, "Tag 1, 01:00", JA2_COLOR_BLACK);
+    DrawLaptopTextLine(surface, 35, 433, "Tag 1, 01:00", JA2_COLOR_BLACK);
 }
 
 static void DrawLaptopWelcome(SDL_Surface *surface)
@@ -320,26 +484,26 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
                         (short)(LAPTOP_HELP_X + 88),
                         (short)(LAPTOP_HELP_Y + 34 + index * 30),
                         JA2_COLOR_ACCENT);
-        DrawCString(surface, (short)(LAPTOP_HELP_X + 18),
-                    (short)(LAPTOP_HELP_Y + 27 + index * 30), buttons[index],
-                    JA2_COLOR_WHITE);
+        DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 18),
+                           (short)(LAPTOP_HELP_Y + 27 + index * 30), buttons[index],
+                           JA2_COLOR_WHITE);
     }
-    DrawCString(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 28),
-                "Ihr Laptop heisst Sie herzlich willkommen!", JA2_COLOR_WHITE);
-    DrawCString(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 45),
-                "(Druecken Sie H, um jederzeit Hilfe aufzurufen)", JA2_COLOR_WHITE);
-    DrawCString(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 82),
-                "Hier finden Sie mehrere Programme, mit denen Sie", JA2_COLOR_WHITE);
-    DrawCString(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 99),
-                "Ihren Urlaub in Arulco organisieren koennen.", JA2_COLOR_WHITE);
-    DrawCString(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 124),
-                "Sie sollten zuerst Ihre E-Mails pruefen und dann", JA2_COLOR_WHITE);
-    DrawCString(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 141),
-                "die A.I.M.-Homepage der Soeldner ansehen.", JA2_COLOR_WHITE);
-    DrawCString(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 174),
-                "Wenn Sie bereit sind, nach Arulco zu gehen,", JA2_COLOR_WHITE);
-    DrawCString(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 191),
-                "schliessen Sie Ihren Laptop.", JA2_COLOR_WHITE);
+    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 28),
+                       "Ihr Laptop heisst Sie herzlich willkommen!", JA2_COLOR_WHITE);
+    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 45),
+                       "(Druecken Sie H, um jederzeit Hilfe aufzurufen)", JA2_COLOR_WHITE);
+    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 82),
+                       "Hier finden Sie mehrere Programme, mit denen Sie", JA2_COLOR_WHITE);
+    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 99),
+                       "Ihren Urlaub in Arulco organisieren koennen.", JA2_COLOR_WHITE);
+    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 124),
+                       "Sie sollten zuerst Ihre E-Mails pruefen und dann", JA2_COLOR_WHITE);
+    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 141),
+                       "die A.I.M.-Homepage der Soeldner ansehen.", JA2_COLOR_WHITE);
+    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 174),
+                       "Wenn Sie bereit sind, nach Arulco zu gehen,", JA2_COLOR_WHITE);
+    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 103), (short)(LAPTOP_HELP_Y + 191),
+                       "schliessen Sie Ihren Laptop.", JA2_COLOR_WHITE);
     FillRectRGB555(surface, (short)(LAPTOP_HELP_X + 11),
                    (short)(LAPTOP_HELP_Y + 263),
                    (short)(LAPTOP_HELP_X + 28),
@@ -348,9 +512,9 @@ static void DrawLaptopWelcome(SDL_Surface *surface)
                     (short)(LAPTOP_HELP_Y + 263),
                     (short)(LAPTOP_HELP_X + 28),
                     (short)(LAPTOP_HELP_Y + 280), JA2_COLOR_WHITE);
-    DrawCString(surface, (short)(LAPTOP_HELP_X + 38),
-                (short)(LAPTOP_HELP_Y + 276),
-                "Diese Hilfe nicht mehr anzeigen", JA2_COLOR_WHITE);
+    DrawLaptopTextLine(surface, (short)(LAPTOP_HELP_X + 38),
+                       (short)(LAPTOP_HELP_Y + 276),
+                       "Diese Hilfe nicht mehr anzeigen", JA2_COLOR_WHITE);
     FrameRectRGB555(surface, (short)(LAPTOP_HELP_X + 291),
                     (short)(LAPTOP_HELP_Y + 9),
                     (short)(LAPTOP_HELP_X + 331),
@@ -420,6 +584,7 @@ Boolean JA2LaptopRender(void)
     if (!gLaptopEntered) {
         gLaptopEntered = 1;
         gLaptopWelcomeVisible = 1;
+        JA2LaptopMusicStart();
         DebugLog("Laptop: entered original-coordinate SDL2 screen welcomeVisible=1");
     }
     SDL_BlitSurface(gLaptopBaseSurface, NULL, gMenuSurface, NULL);
@@ -446,6 +611,7 @@ void JA2LaptopHandleClick(short x, short y)
     if (x >= 29 && x < 150 && y >= 371 && y < 430) {
         DebugLog("Laptop: close requested; returning to main menu placeholder");
         JA2LaptopShutdown();
+        JA2MenuMusicStart();
         RestoreMainMenu();
     }
 }
@@ -459,6 +625,7 @@ void JA2LaptopHandleKey(SDL_Keycode key)
             DebugLog("Laptop: welcome overlay closed by Escape");
         } else {
             JA2LaptopShutdown();
+            JA2MenuMusicStart();
             RestoreMainMenu();
         }
     } else if (key == SDLK_h) {

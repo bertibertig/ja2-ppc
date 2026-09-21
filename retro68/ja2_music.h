@@ -6,6 +6,7 @@ typedef void (*JA2MusicLogProc)(const char *format, ...);
 
 void JA2MenuMusicSetLogger(JA2MusicLogProc logger);
 void JA2MenuMusicStart(void);
+void JA2LaptopMusicStart(void);
 void JA2MenuMusicPoll(void);
 void JA2MenuMusicStop(void);
 void JA2MenuMusicShutdown(void);

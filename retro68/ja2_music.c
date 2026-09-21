@@ -25,6 +25,7 @@ static Boolean gMusicFadingIn;
 static Boolean gMusicStatusLogged;
 static unsigned long gMusicStartTicks;
 static JA2MusicLogProc gMusicLog;
+static char gMusicEntryName[64];
 
 #define MusicLog(...) do { if (gMusicLog != NULL) gMusicLog(__VA_ARGS__); } while (0)
 
@@ -60,7 +61,7 @@ static pascal void MusicCallback(SndChannelPtr channel, SndCommand *command)
     }
 }
 
-static Boolean LoadMenuMusic(void)
+static Boolean LoadMusic(const char *entryName)
 {
     JA2SLFArchive *archive;
     unsigned char wavHeader[12];
@@ -77,22 +78,22 @@ static Boolean LoadMenuMusic(void)
     unsigned short bitsPerSample = 0;
     Boolean foundFormat = 0;
 
-    MusicLog("Music: opening Music.slf for MENUMIX1.WAV");
+    MusicLog("Music: opening Music.slf for %s", entryName);
     archive = JA2SLFOpen("Music.slf");
     if (archive == NULL) {
         MusicLog("Music: cannot open Music.slf");
         return 0;
     }
-    if (!JA2SLFFind(archive, "MENUMIX1.WAV", &entryOffset, &entryLength)) {
-        MusicLog("Music: MENUMIX1.WAV is missing from Music.slf");
+    if (!JA2SLFFind(archive, entryName, &entryOffset, &entryLength)) {
+        MusicLog("Music: %s is missing from Music.slf", entryName);
         JA2SLFClose(archive);
         return 0;
     }
-    MusicLog("Music: found MENUMIX1.WAV offset=%lu length=%lu", entryOffset, entryLength);
+    MusicLog("Music: found %s offset=%lu length=%lu", entryName, entryOffset, entryLength);
     if (entryLength < sizeof(wavHeader) ||
         !JA2SLFRead(archive, entryOffset, wavHeader, sizeof(wavHeader)) ||
         memcmp(wavHeader, "RIFF", 4) != 0 || memcmp(&wavHeader[8], "WAVE", 4) != 0) {
-        MusicLog("Music: MENUMIX1.WAV is not a valid RIFF/WAVE file");
+        MusicLog("Music: %s is not a valid RIFF/WAVE file", entryName);
         JA2SLFClose(archive);
         return 0;
     }
@@ -159,7 +160,7 @@ static Boolean LoadMenuMusic(void)
     return 1;
 }
 
-static void PlayMenuMusic(void)
+static void PlayMusic(void)
 {
     SndCommand command;
     OSErr error;
@@ -205,17 +206,24 @@ void JA2MenuMusicSetLogger(JA2MusicLogProc logger)
     gMusicLog = logger;
 }
 
+static void StartMusicEntry(const char *entryName);
+
 void JA2MenuMusicStart(void)
+{
+    if (gMusicChannel != NULL) {
+        PlayMusic();
+        return;
+    }
+    StartMusicEntry("MENUMIX1.WAV");
+}
+
+static void StartMusicEntry(const char *entryName)
 {
     OSErr error;
 
-    if (gMusicChannel != NULL) {
-        PlayMenuMusic();
-        return;
-    }
-    if (!LoadMenuMusic()) {
-        return;
-    }
+    if (!LoadMusic(entryName)) return;
+    strncpy(gMusicEntryName, entryName, sizeof(gMusicEntryName) - 1);
+    gMusicEntryName[sizeof(gMusicEntryName) - 1] = 0;
     gMusicCallback = NewSndCallBackUPP(MusicCallback);
     if (gMusicCallback == NULL) {
         MusicLog("Music: cannot create Sound Manager callback descriptor");
@@ -237,7 +245,16 @@ void JA2MenuMusicStart(void)
     }
     gMusicAvailable = 1;
     MusicLog("Music: stereo sampled Sound Manager channel created");
-    PlayMenuMusic();
+    PlayMusic();
+}
+
+void JA2LaptopMusicStart(void)
+{
+    if (gMusicChannel != NULL) {
+        JA2MenuMusicStop();
+    }
+    MusicLog("Music: starting laptop mode MARIMBAD 2.WAV");
+    StartMusicEntry("MARIMBAD 2.WAV");
 }
 
 void JA2MenuMusicPoll(void)
@@ -277,8 +294,8 @@ void JA2MenuMusicPoll(void)
     if (gMusicEnded) {
         gMusicEnded = 0;
         gMusicPlaying = 0;
-        MusicLog("Music: end callback received; restarting MENUMIX1.WAV");
-        PlayMenuMusic();
+        MusicLog("Music: end callback received; restarting %s", gMusicEntryName);
+        PlayMusic();
     }
 }
 
@@ -300,6 +317,7 @@ void JA2MenuMusicShutdown(void)
     gMusicAvailable = 0;
     gMusicFadingIn = 0;
     gMusicStatusLogged = 0;
+    gMusicEntryName[0] = 0;
 }
 
 void JA2MenuMusicStop(void)
