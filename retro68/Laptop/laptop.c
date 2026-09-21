@@ -500,8 +500,14 @@ static void DrawLaptopTextLine(SDL_Surface *surface, short x, short y,
                         break;
                     }
                     while (run-- != 0) {
-                        WritePixel(surface, (short)(cursorX + offsetX + column),
-                                   (short)(y + offsetY + row), color);
+                        unsigned char paletteIndex = *source;
+                        if (paletteIndex == 1) {
+                            WritePixel(surface, (short)(cursorX + offsetX + column),
+                                       (short)(y + offsetY + row), JA2_COLOR_BLACK);
+                        } else if (paletteIndex != 0) {
+                            WritePixel(surface, (short)(cursorX + offsetX + column),
+                                       (short)(y + offsetY + row), color);
+                        }
                         ++column;
                         ++source;
                     }
