@@ -6,7 +6,7 @@ description: Deploy and run a JA2 PPC build on the real PowerBook G3 Lombard (Ma
 # Real-hardware test on the PowerBook G3
 
 Machine id: `powerbook-g3` (config `~/.config/classic-mac-hardware/machines.json`,
-<powerbook-host>, G3 333 MHz, 384 MB, Mac OS 9.2.2, Open Transport).
+which holds the Mac's LAN address; G3 333 MHz, 384 MB, Mac OS 9.2.2, Open Transport).
 On the Mac, RumpusFTP (port 21) and LaunchAPPLServer (TCP, port 1984) must be
 running. The FTP root is the folder the app runs in; `Data/`, `Ja2.ini` and
 `options.cfg` live there, and debug logs are written there.
@@ -14,7 +14,7 @@ running. The FTP root is the folder the app runs in; `Data/`, `Ja2.ini` and
 ## 0. Is the Mac up?
 
 ```sh
-ping -c1 -W1 <powerbook-host>
+ping -c1 -W1 <host from machines.json>
 ```
 
 If it does not answer, stop and tell the user the PowerBook must be switched

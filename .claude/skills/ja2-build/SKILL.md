@@ -5,20 +5,20 @@ description: Configure and build the JA2 PPC Retro68 targets (German/English, de
 
 # Building JA2 PPC
 
-All paths relative to the repo root `<repo root>`.
+All paths relative to the repo root. Machine-specific paths (toolchain, game
+data, emulator images) live in the git-ignored `local.env` (template:
+`local.env.example`); read it for the actual values and never write them
+into tracked files.
 
 ## Toolchain
 
-| Toolchain | Path |
-|---|---|
-| Current (2026-10 rebuild, universal interfaces) | `$RETRO68_TOOLCHAIN/powerpc-apple-macos/cmake/retroppc.toolchain.cmake` |
-| Fallback (2026-09) | `$RETRO68_TOOLCHAIN/powerpc-apple-macos/cmake/retroppc.toolchain.cmake` |
-
-Use the current toolchain once `$RETRO68_BUILD/build.log` ends with
-`EXIT=0`. A build dir is bound to the toolchain it was configured with;
+`RETRO68_TOOLCHAIN` in `local.env` is the toolchain root (the 2026-10
+rebuild with universal interfaces); the toolchain file is
+`$RETRO68_TOOLCHAIN/powerpc-apple-macos/cmake/retroppc.toolchain.cmake`. An
+older fallback toolchain is noted in `local.env`. A build dir is bound to the toolchain it was configured with;
 switching toolchain means a fresh build dir (or delete `CMakeCache.txt`).
 
-Data: `$JA2_DATA_DIR` (needs `Ja2.ini` + `Data/`).
+Data: `$JA2_DATA_DIR` from `local.env` (needs `Ja2.ini` + `Data/`).
 
 ## Configurations
 
@@ -30,6 +30,7 @@ Data: `$JA2_DATA_DIR` (needs `Ja2.ini` + `Data/`).
 | `retro68/build-profile` | German + `-DJA2_PROFILE=ON` (see `ja2-profile` skill) |
 
 ```sh
+. tools/local-env.sh
 TC=$RETRO68_TOOLCHAIN/powerpc-apple-macos/cmake/retroppc.toolchain.cmake
 cmake -S retro68 -B retro68/build-german-debug -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE=$TC \
@@ -38,8 +39,8 @@ cmake -S retro68 -B retro68/build-german-debug -G Ninja \
 cmake --build retro68/build-german-debug
 ```
 
-`tools/build-german-debug.sh all` does the same with the fallback toolchain
-unless `RETRO68_TOOLCHAIN_FILE` is set.
+`tools/build-german-debug.sh all` does the same (it reads `local.env`;
+`RETRO68_TOOLCHAIN_FILE` overrides the toolchain file).
 
 Avoid `--clean-first` unless needed: it re-runs the intro video conversion
 (FFmpeg) and re-copies the full `Data/` tree.

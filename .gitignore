@@ -5,3 +5,4 @@
 /machines.json
 /.emu-out/
 /.hw-out/
+/local.env

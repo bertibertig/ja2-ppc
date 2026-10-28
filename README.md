@@ -35,13 +35,17 @@ copyrighted data archives.
 - A legally owned JA2 installation for data bundling
 - InfiniteMac, SheepShaver, or a Power Macintosh running Mac OS 9 for testing
 
-The examples below use this local toolchain:
+Machine-specific paths are kept out of the repository. Copy
+`local.env.example` to `local.env` (git-ignored) and set the Retro68
+toolchain root, the JA2 data directory, and the emulator paths there; the
+scripts in `tools/` read it automatically. The examples below use these
+variables, for example the toolchain file:
 
 ```text
 $RETRO68_TOOLCHAIN/powerpc-apple-macos/cmake/retroppc.toolchain.cmake
 ```
 
-Change the path if Retro68 is installed elsewhere.
+Run `. tools/local-env.sh` in your shell to load them for manual commands.
 
 ## German Debug Build
 

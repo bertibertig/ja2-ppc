@@ -6,11 +6,13 @@ set -euo pipefail
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SOURCE_DIR="$ROOT_DIR/retro68"
+# Machine-specific paths come from the git-ignored local.env.
+. "$ROOT_DIR/tools/local-env.sh"
 BUILD_DIR="${JA2_BUILD_DIR:-$SOURCE_DIR/build-dingus-debug}"
 DEPLOY_DIR="${JA2_DEPLOY_DIR:-$ROOT_DIR/.dingusppc/deploy}"
 LANGUAGE="${JA2_LANGUAGE:-german}"
 DATA_DIR="${JA2_DATA_DIR:-}"
-TOOLCHAIN_FILE="${RETRO68_TOOLCHAIN_FILE:-$RETRO68_TOOLCHAIN/powerpc-apple-macos/cmake/retroppc.toolchain.cmake}"
+TOOLCHAIN_FILE="${RETRO68_TOOLCHAIN_FILE:-${RETRO68_TOOLCHAIN:-}/powerpc-apple-macos/cmake/retroppc.toolchain.cmake}"
 CONFIG_FILE="$ROOT_DIR/opencode.json"
 
 if [[ -n "${DINGUS_ROOT:-}" ]]; then
@@ -18,7 +20,7 @@ if [[ -n "${DINGUS_ROOT:-}" ]]; then
 elif command -v jq >/dev/null 2>&1; then
     DINGUS_ROOT=$(jq -r '.references.dingusppcRepo.path // empty' "$CONFIG_FILE")
 else
-    DINGUS_ROOT=$DINGUS_ROOT
+    DINGUS_ROOT=
 fi
 
 DINGUS_BIN="${DINGUS_BIN:-$DINGUS_ROOT/build/bin/dingusppc}"

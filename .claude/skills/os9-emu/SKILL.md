@@ -17,6 +17,9 @@ description: Run a JA2 PPC build headlessly in a Mac OS 8.6/9 emulator (QEMU mac
 4. `collect` copies `JA2PPC-Debug.log` and `JA2PROF.csv` to `.emu-out/`.
    No log means the game never started (or the OS never finished booting).
 
+Paths (`EMU_WORK_DIR`, `EMU_INSTALL_CD`, `DINGUS_ROOT`, `RETRO68_TOOLCHAIN`)
+come from the git-ignored `local.env` (see `local.env.example`).
+
 Variables: `EMU_ENGINE=qemu|dingus` (default qemu), `JA2_BUILD_DIR`, `EMU_OPTIONS=<cfg>`
 (e.g. with `skip_intros=1`), `EMU_TIMEOUT`, `EMU_BASE_IMAGE`,
 `EMU_SCREENSHOTS` (N evenly spaced guest-only PNGs in `.emu-out/`: QEMU via

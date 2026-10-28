@@ -17,15 +17,17 @@ set -euo pipefail
 # DingusPPC by capturing its own XWayland window, never the host desktop.
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# Machine-specific paths come from the git-ignored local.env.
+. "$ROOT_DIR/tools/local-env.sh"
 ENGINE="${EMU_ENGINE:-qemu}"
 BUILD_DIR="${JA2_BUILD_DIR:-$ROOT_DIR/retro68/build-german-debug}"
-WORK_DIR="${EMU_WORK_DIR:-$EMU_WORK_DIR}"
+WORK_DIR="${EMU_WORK_DIR:?set EMU_WORK_DIR in local.env (see local.env.example)}"
 OUT_DIR="${EMU_OUT_DIR:-$ROOT_DIR/.emu-out}"
 TIMEOUT="${EMU_TIMEOUT:-240}"
-HFS_BIN="${HFS_BIN:-$RETRO68_TOOLCHAIN/bin}"
-DINGUS_ROOT="${DINGUS_ROOT:-$DINGUS_ROOT}"
+HFS_BIN="${HFS_BIN:-${RETRO68_TOOLCHAIN:?set RETRO68_TOOLCHAIN in local.env}/bin}"
+DINGUS_ROOT="${DINGUS_ROOT:-}"
 DINGUS_BIN="${DINGUS_BIN:-$DINGUS_ROOT/build/bin/dingusppc}"
-DINGUS_BASE_DIR="${DINGUS_BASE_DIR:-$EMU_WORK_DIR/base86}"
+DINGUS_BASE_DIR="${DINGUS_BASE_DIR:-$WORK_DIR/base86}"
 DINGUS_BOOTROM="${DINGUS_BOOTROM:-$DINGUS_BASE_DIR/pm7600.rom}"
 # Low-end target: Power Mac 7600/120 (604 at 120 MHz), 64 MB, onboard
 # "control" video with 2 MB VRAM (the smallest DingusPPC emulates; AGENTS.md
@@ -36,7 +38,7 @@ DINGUS_MACHINE=(-m pm7600 --cpu 604 --rambank1_size 64 --mon_id VGA-SVGA
     --gfxmem_size 2)
 QEMU_BIN="${QEMU_BIN:-qemu-system-ppc}"
 EMU_SCREENSHOTS="${EMU_SCREENSHOTS:-20}"
-INSTALL_CD="${EMU_INSTALL_CD:-/path/to/media/Mac OS/OS 9/Mac OS D-9.2.2 iMac CD.iso}"
+INSTALL_CD="${EMU_INSTALL_CD:-}"
 # Mirror the PowerBook G3 Lombard test machine as far as mac99 allows:
 # G3 (750, no AltiVec), PMU, 384 MB, 1024x768 at 16-bit (the LCD panel).
 # Not reproducible: 333 MHz clock, ATI Rage LT Pro (QEMU VGA instead),
@@ -46,7 +48,7 @@ QEMU_MACHINE=(-M mac99,via=pmu -cpu 750 -m 384 -g 1024x768x16
 
 case "$ENGINE" in
     dingus) BASE_IMAGE="${EMU_BASE_IMAGE:-$DINGUS_BASE_DIR/macos86.img}" ;;
-    qemu) BASE_IMAGE="${EMU_BASE_IMAGE:-$EMU_WORK_DIR/base/macos922.img}" ;;
+    qemu) BASE_IMAGE="${EMU_BASE_IMAGE:-$WORK_DIR/base/macos922.img}" ;;
     *) printf 'error: EMU_ENGINE must be dingus or qemu\n' >&2; exit 1 ;;
 esac
 WORK_IMAGE="$WORK_DIR/$ENGINE-work.img"
@@ -148,7 +150,7 @@ deploy() {
 
 run_dingus() {
     local pid shot interval window
-    [[ -x "$DINGUS_BIN" ]] || die "DingusPPC not found: $DINGUS_BIN"
+    [[ -x "$DINGUS_BIN" ]] || die "DingusPPC not found: $DINGUS_BIN (set DINGUS_ROOT in local.env)"
     [[ -f "$DINGUS_BOOTROM" ]] || die "BootROM not found: $DINGUS_BOOTROM"
     mkdir -p "$DINGUS_STATE"
     # X11 (XWayland) so the window can be captured on its own.
@@ -215,7 +217,7 @@ run() {
 # the user can initialize it (Mac OS Standard/HFS, which hfsutils can write)
 # and install Mac OS. Creates an empty 4 GB base image if none exists.
 install_os() {
-    [[ -f "$INSTALL_CD" ]] || die "install CD not found: $INSTALL_CD"
+    [[ -f "$INSTALL_CD" ]] || die "install CD not found; set EMU_INSTALL_CD in local.env"
     mkdir -p "$(dirname "$BASE_IMAGE")"
     [[ -f "$BASE_IMAGE" ]] || truncate -s 4G "$BASE_IMAGE"
     run_qemu_gui -boot d \

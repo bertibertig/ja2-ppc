@@ -81,11 +81,7 @@ the original x86 source code first. The original source tree is located at:
 ../ja2-master/ja2/Build/
 ```
 
-From the repository root this resolves to:
-
-```text
-../ja2-master/ja2/Build/
-```
+(relative to the repository root: `ja2-master/` is a sibling checkout).
 
 Trace the original entry points, state transitions, assets, constants, and
 error handling before writing the PPC version. Use the matching original file

@@ -7,9 +7,11 @@ set -euo pipefail
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 SOURCE_DIR="$ROOT_DIR/retro68"
+# Machine-specific paths come from the git-ignored local.env.
+. "$SCRIPT_DIR/local-env.sh"
 BUILD_DIR="${JA2_BUILD_DIR:-$SOURCE_DIR/build-german-debug}"
-DATA_DIR="${JA2_DATA_DIR:-$ROOT_DIR/../../../path/to/Jagged Alliance 2}"
-TOOLCHAIN_FILE="${RETRO68_TOOLCHAIN_FILE:-$ROOT_DIR/../../../Retro68-build/toolchain/powerpc-apple-macos/cmake/retroppc.toolchain.cmake}"
+DATA_DIR="${JA2_DATA_DIR:?set JA2_DATA_DIR in local.env (see local.env.example)}"
+TOOLCHAIN_FILE="${RETRO68_TOOLCHAIN_FILE:-${RETRO68_TOOLCHAIN:?set RETRO68_TOOLCHAIN in local.env}/powerpc-apple-macos/cmake/retroppc.toolchain.cmake}"
 
 die() {
     printf 'error: %s\n' "$*" >&2

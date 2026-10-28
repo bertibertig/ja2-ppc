@@ -37,4 +37,8 @@ the ~270k lines of original game code, so the port moves to this model:
 - Unattended hardware tests: `tools/machw.py autotest tests/autotest/<x>.txt`
   replays a script inside the app (`retro68/ja2_autotest.c`) and collects
   logs and screenshots; prefer it over asking the user to click on the Mac.
+- Machine-specific paths (toolchain, game data, emulator images, install
+  media) and LAN addresses live only in the git-ignored `local.env`
+  (template `local.env.example`). Read them from there; never write them
+  into tracked files, docs or commit messages.
 - Commit author email: sascha.bertleff@proton.me (set in the repo config).
