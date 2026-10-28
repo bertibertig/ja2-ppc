@@ -2,7 +2,9 @@
 
 #if defined(JA2_PROFILE)
 
-#include "ja2_mac_internal.h"
+#include <Quickdraw.h>
+
+void DebugLog(const char *format, ...);
 #include "ja2_options.h"
 
 #include <Gestalt.h>

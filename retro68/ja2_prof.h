@@ -7,7 +7,9 @@
    release code. Zones are inclusive: a nested zone's time is also counted
    in its caller. */
 
+#ifdef macintosh
 #include <Quickdraw.h>
+#endif
 
 enum {
     JA2_PROF_EVENTS,

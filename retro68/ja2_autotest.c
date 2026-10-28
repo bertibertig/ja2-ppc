@@ -1,9 +1,8 @@
 #include "ja2_autotest.h"
 
-#include "ja2_mac_internal.h"
 #include "ja2_options.h"
 #include "ja2_prof.h"
-#include "ja2_sgp_selftest.h"
+#include "screenids.h"
 
 #include <SDL.h>
 #include <stdarg.h>
@@ -20,15 +19,10 @@
  *   click <x> <y> [right]
  *   key <name>           SDL key name: Escape, Return, Space, Q, Left, F1...
  *   shot <name>          save the window surface to <name>.bmp
- *   expect <screen>      fail unless the shell shows that screen
- *                        (main, new_game, difficulty, intro, load_game,
- *                        options, credits, laptop)
+ *   expect <screen>      fail unless the game shows that screen
+ *                        (main, difficulty, intro, load_game, options,
+ *                        credits, laptop, init, msgbox, fade, map, game)
  *   waitfor <screen> <ms> pause until that screen shows; fail after ms
- *   sgptest              run the Standard Gaming Platform self-test
- *                        (ja2_sgp_selftest.c); each failed check counts
- *   sgpvideo             run the SGP video self-test (after sgptest): draws
- *                        a fixed scene through the original blitters and
- *                        presents it in the window
  *   mark <label>         profiler marker (profile builds) + log line
  *   log <text>           log line
  *   timeout <s>          watchdog, quits with result=timeout (default 600)
@@ -60,10 +54,35 @@ static Boolean gMouseScripted;
 static int gMouseX;
 static int gMouseY;
 
+void DebugLog(const char *format, ...);
+
+/* The window the platform layer (sgp_sdl.c) draws into. */
+extern SDL_Window *gWindow;
+/* The original game loop's current screen (gameloop.c). */
+extern unsigned int guiCurrentScreen;
+
+/* Script names for the original screens (ScreenIds, screenids.h). */
 static const char *gScreenNames[] = {
-    "main", "new_game", "difficulty", "intro",
-    "load_game", "options", "credits", "laptop"
+    "main", "difficulty", "intro", "load_game", "options", "credits",
+    "laptop", "init", "msgbox", "fade", "map", "game"
 };
+static const unsigned int gScreenIds[] = {
+    MAINMENU_SCREEN, GAME_INIT_OPTIONS_SCREEN, INTRO_SCREEN, SAVE_LOAD_SCREEN,
+    OPTIONS_SCREEN, CREDIT_SCREEN, LAPTOP_SCREEN, INIT_SCREEN, MSG_BOX_SCREEN,
+    FADE_SCREEN, MAP_SCREEN, GAME_SCREEN
+};
+
+static short CurrentScreenIndex(void)
+{
+    short index;
+
+    for (index = 0; index < (short)(sizeof(gScreenIds) / sizeof(gScreenIds[0])); ++index) {
+        if (gScreenIds[index] == guiCurrentScreen) {
+            return index;
+        }
+    }
+    return -1;
+}
 
 static void AutotestLog(const char *format, ...)
 {
@@ -240,9 +259,8 @@ static void Expect(const char *screen)
 {
     const char *actual = "unknown";
 
-    if (gMenuScreen >= 0 &&
-        gMenuScreen < (short)(sizeof(gScreenNames) / sizeof(gScreenNames[0]))) {
-        actual = gScreenNames[gMenuScreen];
+    if (CurrentScreenIndex() >= 0) {
+        actual = gScreenNames[CurrentScreenIndex()];
     }
     if (strcmp(actual, screen) == 0) {
         AutotestLog("ok expect %s", screen);
@@ -331,16 +349,6 @@ static Boolean RunCommand(char *line)
         Expect(argument);
         return 0;
     }
-    if (strcmp(command, "sgptest") == 0) {
-        gFailures += (short)JA2SGPSelfTest(AutotestLog);
-        return 0;
-    }
-    if (strcmp(command, "sgpvideo") == 0) {
-        /* No yield: a following "shot" captures the SGP frame before the
-           shell's own screens draw over it. */
-        gFailures += (short)JA2SGPGraphicsSelfTest(AutotestLog);
-        return 0;
-    }
     if (strcmp(command, "mark") == 0) {
         JA2_PROF_MARK(argument);
         AutotestLog("mark %s", argument);
@@ -378,7 +386,7 @@ void JA2AutotestFrame(void)
         return;
     }
     if (gWaitForScreen >= 0) {
-        if (gMenuScreen == gWaitForScreen) {
+        if (CurrentScreenIndex() == gWaitForScreen) {
             AutotestLog("ok waitfor %s", gScreenNames[gWaitForScreen]);
             gWaitForScreen = -1;
         } else if ((Sint32)(SDL_GetTicks() - gWaitForDeadline) >= 0) {

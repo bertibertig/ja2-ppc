@@ -1,6 +1,8 @@
 #include "ja2_options.h"
 
-#include "ja2_mac_internal.h"
+#include <Quickdraw.h>
+
+void DebugLog(const char *format, ...);
 
 #include <stdio.h>
 #include <stdlib.h>

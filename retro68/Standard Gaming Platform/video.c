@@ -9,14 +9,13 @@
 	#include "vobject_blitters.h"
 	#include "sgp.h"
 	#include <stdio.h>
-#ifndef JA2_PPC
 	#include "renderworld.h"
 	#include "Render Dirty.h"
 	#include "Isometric utils.h"
 	#include "fade screen.h"
 	#include "timer control.h"
-#else
-	#include "sgp_video_game.h"
+#ifdef JA2_PPC
+	#include "input.h"			// FreeMouseCursor (came with JA2 SGP ALL.H)
 #endif
 	#include "impTGA.h"
 	#include "Fileman.h"
@@ -246,9 +245,11 @@ BOOLEAN InitializeVideoManager(HINSTANCE hInstance, UINT16 usCommandShow, void *
   /////////////////////////////////////////////////////////////////////////////////////////////////
   
 #ifdef JA2_PPC
-  // JA2 PPC: the shell (ja2_mac.c) owns the SDL window; the software
-  // DirectDraw hands each flipped frame to gpSGPDDPresent.
+  // JA2 PPC: the platform layer (sgp_sdl.c) owns the SDL window; the
+  // software DirectDraw hands each flipped frame to gpSGPDDPresent, and the
+  // message emulation delivers messages to the window procedure.
   hWindow = (HWND)1;
+  SGPSetWindowProc( (WNDPROC) WindowProc );
 	memset( gpFrameData, 0, sizeof( gpFrameData ) );
   ghWindow = hWindow;
 #else

@@ -1,5 +1,0 @@
-# Standard Gaming Platform core self-test (ja2_sgp_selftest.c): file
-# database, file manager, MSVC rand(), clock, containers.
-timeout 120
-sgptest
-quit

@@ -5,7 +5,8 @@ The x86 sources were built on a case-insensitive file system and spell the
 same header several ways ("types.h", "Types.h", "DEBUG.H", "debug.h").
 For every quoted #include in the given source directories that resolves
 to an existing header only case-insensitively, this writes a symlink with
-the exact spelling into the output directory. Add that directory to the
+the exact spelling into the output directory. Spellings with Windows
+directory separators get a link whose name contains the backslashes. Add that directory to the
 include path after the real source directories.
 
     gen_case_includes.py OUTPUT_DIR SOURCE_DIR [SOURCE_DIR ...]
@@ -48,7 +49,13 @@ def main():
     for spelling in sorted(wanted):
         base = os.path.basename(spelling.replace("\\", "/"))
         target = headers.get(base.lower())
-        if target is None or os.path.basename(target) == base:
+        if target is None:
+            continue
+        if "\\" in spelling:
+            # "LAPTOP\\files.h", "\\JA2\\Build\\utils\\Font Control.h": on a
+            # POSIX host the backslashes are part of one file name.
+            base = spelling
+        elif os.path.basename(target) == base:
             continue
         link = os.path.join(output, base)
         if os.path.lexists(link):

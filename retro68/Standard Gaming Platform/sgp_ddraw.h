@@ -26,14 +26,6 @@ typedef struct SGPDDSurface SGPDDSurface, *LPDIRECTDRAWSURFACE, *LPDIRECTDRAWSUR
 typedef struct SGPDDPalette SGPDDPalette, *LPDIRECTDRAWPALETTE;
 typedef struct SGPDDClipper SGPDDClipper, *LPDIRECTDRAWCLIPPER;
 
-typedef struct
-{
-	LONG left;
-	LONG top;
-	LONG right;
-	LONG bottom;
-} RECT, *LPRECT;
-
 
 typedef struct
 {

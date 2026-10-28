@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sgp_wchar.h"
+
 /* The original opens files with Windows paths relative to the process's
  * current directory ("..\\Ja2.ini", "Data\\..."); route them through the
  * same path mapping as CreateFile (sgp_win32.c). */

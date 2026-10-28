@@ -23,14 +23,20 @@ endif()
 # retro68/JA2_PPC_SDL2_MIGRATION_PLAN.md for the required link/stub policy.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SDL2Classic.cmake)
 
-# Standard Gaming Platform: the original SGP sources at their mapped paths,
-# changed only behind JA2_PPC, plus the Win32 compatibility layer
-# (sgp_win32.c). See CLAUDE.md "Architecture decision".
+# The game: the original JA2 sources at their mapped paths, changed only
+# behind JA2_PPC, on a Mac reimplementation of the Standard Gaming Platform.
+# See CLAUDE.md "Architecture decision" and AGENTS.md "Port Architecture".
 set(JA2_SGP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Standard Gaming Platform")
+
+# Port files of the platform layer (full warnings).
 set(JA2_SGP_PORT_SOURCES
     "${JA2_SGP_DIR}/sgp_win32.c"
+    "${JA2_SGP_DIR}/sgp_win32_msg.c"
+    "${JA2_SGP_DIR}/sgp_wchar.c"
     "${JA2_SGP_DIR}/sgp_ddraw.c"
-    "${JA2_SGP_DIR}/sgp_video_game.c"
+    "${JA2_SGP_DIR}/sgp_sdl.c"
+    "${JA2_SGP_DIR}/sgp_mss.c"
+    "${JA2_SGP_DIR}/sgp_smack.c"
 )
 set(JA2_SGP_ORIGINAL_SOURCES
     "${JA2_SGP_DIR}/DEBUG.C"
@@ -52,68 +58,123 @@ set(JA2_SGP_ORIGINAL_SOURCES
     "${JA2_SGP_DIR}/DirectDraw Calls.c"
     "${JA2_SGP_DIR}/DirectX Common.c"
     "${JA2_SGP_DIR}/Mutex Manager.c"
+    "${JA2_SGP_DIR}/Font.c"
+    "${JA2_SGP_DIR}/input.c"
+    "${JA2_SGP_DIR}/mousesystem.c"
+    "${JA2_SGP_DIR}/Button System.c"
+    "${JA2_SGP_DIR}/Button Sound Control.c"
+    "${JA2_SGP_DIR}/Cursor Control.c"
+    "${JA2_SGP_DIR}/MemMan.c"
+    "${JA2_SGP_DIR}/line.c"
+    "${JA2_SGP_DIR}/English.c"
+    "${JA2_SGP_DIR}/soundman.c"
+    "${JA2_SGP_DIR}/sgp.c"
 )
-set(JA2_SGP_SOURCES ${JA2_SGP_PORT_SOURCES} ${JA2_SGP_ORIGINAL_SOURCES})
-# The x86 sources spell headers in several cases ("types.h", "DEBUG.H");
-# give each spelling an alias for the case-sensitive host file system.
+# Original game files (ja2/Build/ mapped to retro68/).
+set(JA2_GAME_SOURCES
+    gameloop.c
+    SCREENS.C
+    jascreens.c
+    Init.c
+    "Sys Globals.c"
+    GameVersion.c
+    GameSettings.c
+    "JA2 Splash.c"
+    Intro.c
+    MainMenuScreen.c
+    Credits.c
+    GameInitOptionsScreen.c
+    "Options Screen.c"
+    MessageBoxScreen.c
+    "Fade Screen.c"
+    Utils/Cinematics.c
+    Utils/Cursors.c
+    "Utils/Encrypted File.c"
+    "Utils/Font Control.c"
+    Utils/_GermanText.c
+    Utils/_EnglishText.c
+    Utils/_Ja25GermanText.c
+    Utils/_Ja25EnglishText.c
+    Utils/MercTextBox.c
+    "Utils/Multi Language Graphic Utils.c"
+    "Utils/Music Control.c"
+    Utils/Slider.c
+    "Utils/Sound Control.c"
+    "Utils/Text Input.c"
+    "Utils/Text Utils.c"
+    "Utils/Timer Control.c"
+    Utils/Utilities.c
+    Utils/WordWrap.c
+    "TileEngine/Render Dirty.c"
+    TileEngine/sysutil.c
+    # Stand-ins for the original modules not ported yet.
+    ja2_ppc_unported.c
+)
+
+# The x86 sources spell headers in several cases ("types.h", "DEBUG.H",
+# "LAPTOP\files.h"); give each spelling an alias for the case-sensitive
+# host file system.
 set(JA2_CASE_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/case-include")
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 execute_process(
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_case_includes.py"
-        "${JA2_CASE_INCLUDE_DIR}" "${JA2_SGP_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${JA2_CASE_INCLUDE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}"
     RESULT_VARIABLE JA2_CASE_INCLUDE_RESULT)
 if(NOT JA2_CASE_INCLUDE_RESULT EQUAL 0)
     message(FATAL_ERROR "gen_case_includes.py failed")
 endif()
+
 # Quoted includes only (-iquote), so Mac headers such as <Timer.h> and
-# <Types.h> never resolve to SGP headers of the same name. -fcommon: the
-# original defines some globals in headers, which MSVC merged. The original
-# files are compiled without warnings (their code is not fixed in place;
-# several of GCC's complaints about them cannot be turned off one by one);
-# the port's own sgp_*.c and the self-test keep all warnings.
-set(JA2_SGP_COMPILE_OPTIONS "-fcommon;-iquote;${JA2_SGP_DIR};-iquote;${CMAKE_CURRENT_SOURCE_DIR};-iquote;${JA2_CASE_INCLUDE_DIR}")
-set_source_files_properties(${JA2_SGP_PORT_SOURCES} ja2_sgp_selftest.c PROPERTIES
+# <Types.h> never resolve to game headers of the same name; the Win32
+# stand-in headers (windows.h, tchar.h, ...) come last. -fcommon: the
+# original defines some globals in headers, which MSVC merged. The text
+# files are Latin-1 and their L"" strings 16-bit. The original files are
+# compiled without warnings and accept what MSVC accepted (implicit int,
+# pointer/int conversions); the port's own files keep all warnings.
+set(JA2_INCLUDE_OPTIONS "-iquote;${JA2_SGP_DIR};-iquote;${CMAKE_CURRENT_SOURCE_DIR}")
+foreach(JA2_SUBDIR Utils TileEngine Tactical Strategic TacticalAI Laptop Editor)
+    list(APPEND JA2_INCLUDE_OPTIONS "-iquote;${CMAKE_CURRENT_SOURCE_DIR}/${JA2_SUBDIR}")
+endforeach()
+list(APPEND JA2_INCLUDE_OPTIONS
+    "-iquote;${JA2_CASE_INCLUDE_DIR}"
+    "-iquote;${CMAKE_CURRENT_SOURCE_DIR}/win32-include"
+    "-idirafter;${CMAKE_CURRENT_SOURCE_DIR}/win32-include")
+set(JA2_ORIGINAL_OPTIONS
+    "${JA2_INCLUDE_OPTIONS};-std=gnu99;-fcommon;-fshort-wchar;-finput-charset=ISO-8859-1;-w"
+    "-Wno-error=implicit-int;-Wno-error=incompatible-pointer-types"
+    "-Wno-error=int-conversion;-Wno-error=return-mismatch")
+string(REPLACE ";;" ";" JA2_ORIGINAL_OPTIONS "${JA2_ORIGINAL_OPTIONS}")
+set_source_files_properties(${JA2_SGP_PORT_SOURCES} PROPERTIES
     COMPILE_DEFINITIONS "JA2;JA2_PPC"
-    COMPILE_OPTIONS "${JA2_SGP_COMPILE_OPTIONS}")
+    COMPILE_OPTIONS "${JA2_INCLUDE_OPTIONS};-std=gnu99;-fcommon;-fshort-wchar")
 set_source_files_properties(${JA2_SGP_ORIGINAL_SOURCES} PROPERTIES
     COMPILE_DEFINITIONS "JA2;JA2_PPC"
-    COMPILE_OPTIONS "${JA2_SGP_COMPILE_OPTIONS};-w")
-# DEBUG.C and PCX.C keep their original upper-case names. CMake skips ".C"
-# in a C-only project and gcc would treat it as C++, so set both.
-set_source_files_properties("${JA2_SGP_DIR}/DEBUG.C" "${JA2_SGP_DIR}/PCX.C" PROPERTIES LANGUAGE C)
-set_property(SOURCE "${JA2_SGP_DIR}/DEBUG.C" "${JA2_SGP_DIR}/PCX.C" APPEND PROPERTY COMPILE_OPTIONS "-x;c")
+    COMPILE_OPTIONS "${JA2_ORIGINAL_OPTIONS}")
+# The game files were built with the precompiled header "JA2 All.h".
+set_source_files_properties(${JA2_GAME_SOURCES} PROPERTIES
+    COMPILE_DEFINITIONS "JA2;JA2_PPC;PRECOMPILEDHEADERS"
+    COMPILE_OPTIONS "${JA2_ORIGINAL_OPTIONS}")
+set_source_files_properties(ja2_autotest.c PROPERTIES
+    COMPILE_OPTIONS "-iquote;${CMAKE_CURRENT_SOURCE_DIR}")
+# DEBUG.C, PCX.C and SCREENS.C keep their original upper-case names. CMake
+# skips ".C" in a C-only project and gcc would treat it as C++, so set both.
+set(JA2_UPPERCASE_C "${JA2_SGP_DIR}/DEBUG.C" "${JA2_SGP_DIR}/PCX.C" SCREENS.C)
+set_source_files_properties(${JA2_UPPERCASE_C} PROPERTIES LANGUAGE C)
+set_property(SOURCE ${JA2_UPPERCASE_C} APPEND PROPERTY COMPILE_OPTIONS "-x;c")
 
 add_application(JA2PPC
+    ${JA2_SGP_PORT_SOURCES}
+    ${JA2_SGP_ORIGINAL_SOURCES}
+    ${JA2_GAME_SOURCES}
     ja2_autotest.c
     ja2_autotest.h
-    ja2_mac.c
-    ja2_mac_internal.h
-    ja2_ppc_text.c
-    ja2_ppc_text.h
-    sdl2_gl_stub.c
-    ja2_game_init_options.c
-    ja2_game_init_options.h
     ja2_options.c
     ja2_options.h
     ja2_prof.c
     ja2_prof.h
-    Laptop/laptop.c
-    Laptop/laptop.h
-    ja2_new_game_init.c
-    ja2_new_game_init.h
-    ja2/Build/Utils/Cinematics.c
-    ja2/Build/Utils/Cinematics.h
     Smacker/smacker.c
     Smacker/smacker.h
-    ${JA2_SGP_SOURCES}
-    ja2_sgp_selftest.c
-    ja2_sgp_selftest.h
-    ja2/Build/Intro.c
-    ja2/Build/Intro.h
-    ja2_music.c
-    ja2_music.h
-    ja2_slf.c
-    ja2_slf.h
+    sdl2_gl_stub.c
     ja2_mac.r
     CREATOR JA2P
 )

@@ -17,6 +17,7 @@
 
 #include <stddef.h>
 #include <stdarg.h>
+#include <stdlib.h>
 
 typedef void *HANDLE;
 typedef void *HWND;
@@ -42,6 +43,24 @@ typedef struct {
     LONG x;
     LONG y;
 } POINT, *LPPOINT;
+
+typedef unsigned int WPARAM;
+typedef long LPARAM;
+typedef long LRESULT;
+typedef void *HHOOK;
+typedef void *HDEVNOTIFY;
+#define CALLBACK
+#define PASCAL
+#define FAR
+#define LOWORD( l ) ( (WORD)( (DWORD)( l ) & 0xffff ) )
+#define HIWORD( l ) ( (WORD)( ( (DWORD)( l ) >> 16 ) & 0xffff ) )
+
+typedef struct {
+    LONG left;
+    LONG top;
+    LONG right;
+    LONG bottom;
+} RECT, *LPRECT;
 
 typedef struct {
     DWORD dwLowDateTime;
@@ -136,8 +155,97 @@ typedef struct {
 #define ShowCursor( fShow ) ( (void)( fShow ), 0 )
 #define ShowWindow( hWindow, iCommand ) ( (void)( hWindow ), (void)( iCommand ), 0 )
 #define SW_HIDE 0
+#define SW_MINIMIZE 6
+#define SW_RESTORE 9
+#define IDOK 1
 #define MB_TASKMODAL 0x00002000L
 #define MB_ICONERROR 0x00000010L
+
+
+/* Window messages and input hooks (sgp_win32_msg.c). The SGP's message
+   loop (sgp.c), its window procedure and input.c's keyboard and mouse hooks
+   stay as written for Windows: the platform layer (sgp_sdl.c) turns each
+   SDL event into the hook call or posted message Windows would have made.
+   Only the messages the game handles are generated. */
+typedef LRESULT (CALLBACK *WNDPROC)(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+typedef LRESULT (CALLBACK *HOOKPROC)(int code, WPARAM wParam, LPARAM lParam);
+
+typedef struct {
+    HWND hwnd;
+    UINT message;
+    WPARAM wParam;
+    LPARAM lParam;
+    DWORD time;
+    POINT pt;
+} MSG;
+
+typedef struct {
+    POINT pt;
+    HWND hwnd;
+    UINT wHitTestCode;
+    DWORD dwExtraInfo;
+} MOUSEHOOKSTRUCT;
+
+#define WM_CREATE 0x0001
+#define WM_DESTROY 0x0002
+#define WM_MOVE 0x0003
+#define WM_SIZE 0x0005
+#define WM_SETFOCUS 0x0007
+#define WM_KILLFOCUS 0x0008
+#define WM_QUIT 0x0012
+#define WM_ACTIVATEAPP 0x001C
+#define WM_KEYFIRST 0x0100
+#define WM_KEYDOWN 0x0100
+#define WM_KEYUP 0x0101
+#define WM_CHAR 0x0102
+#define WM_KEYLAST 0x0108
+#define WM_MOUSEMOVE 0x0200
+#define WM_LBUTTONDOWN 0x0201
+#define WM_LBUTTONUP 0x0202
+#define WM_RBUTTONDOWN 0x0204
+#define WM_RBUTTONUP 0x0205
+#define WM_MOUSEWHEEL 0x020A
+#define WM_SIZING 0x0214
+#define WM_DEVICECHANGE 0x0219
+#define WM_NCLBUTTONDOWN 0x00A1
+#define WM_NCLBUTTONUP 0x00A2
+#define WHEEL_DELTA 120
+#define MSH_MOUSEWHEEL "MSWHEEL_ROLLMSG"
+#define SIZE_RESTORED 0
+#define SIZE_MAXIMIZED 2
+
+#define PM_NOREMOVE 0x0000
+#define PM_REMOVE 0x0001
+
+#define WH_KEYBOARD 2
+#define WH_MOUSE 7
+
+#define MOUSEEVENTF_MOVE 0x0001
+#define MOUSEEVENTF_ABSOLUTE 0x8000
+
+/* Multimedia timers (Timer Control.c): a Time Manager task on the Mac,
+   an interval timer on POSIX hosts. The callback runs at interrupt time
+   on the Mac, as it ran on its own thread under Windows. */
+typedef UINT MMRESULT;
+typedef void (CALLBACK *LPTIMECALLBACK)(UINT id, UINT message, DWORD user, DWORD reserved1,
+                                        DWORD reserved2);
+typedef struct {
+    UINT wPeriodMin;
+    UINT wPeriodMax;
+} TIMECAPS;
+#define TIMERR_NOERROR 0
+#define TIME_ONESHOT 0x0000
+#define TIME_PERIODIC 0x0001
+
+/* Locked allocations (MemAllocLocked): Mac OS 9 has no paging to lock
+   against beyond what the Memory Manager does for the application heap. */
+#define MEM_COMMIT 0x1000
+#define MEM_RELEASE 0x8000
+#define PAGE_READWRITE 0x04
+#define VirtualAlloc( pAddress, uiSize, uiType, uiProtect ) malloc( uiSize )
+#define VirtualFree( pAddress, uiSize, uiType ) ( free( pAddress ), TRUE )
+#define VirtualLock( pAddress, uiSize ) TRUE
+#define VirtualUnlock( pAddress, uiSize ) TRUE
 
 /* The Mac build is single-threaded (no refresh thread), so the Mutex
    Manager's critical sections are no-ops. */
@@ -200,6 +308,52 @@ typedef void (*SGPCursorPosProc)(LONG *x, LONG *y);
 extern SGPCursorPosProc gpSGPGetCursorPos;
 BOOL GetCursorPos(LPPOINT point);
 void GlobalMemoryStatus(MEMORYSTATUS *status);
+
+
+/* Window messages and hooks. */
+BOOL PeekMessage(MSG *message, HWND window, UINT first, UINT last, UINT remove);
+BOOL GetMessage(MSG *message, HWND window, UINT first, UINT last);
+BOOL TranslateMessage(const MSG *message);
+LRESULT DispatchMessage(const MSG *message);
+BOOL WaitMessage(void);
+BOOL PostMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+void PostQuitMessage(int exitCode);
+LRESULT DefWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+UINT RegisterWindowMessage(LPCSTR name);
+HWND FindWindowEx(HWND parent, HWND after, LPCSTR className, LPCSTR windowName);
+BOOL SetForegroundWindow(HWND window);
+HHOOK SetWindowsHookEx(int hookType, HOOKPROC proc, HINSTANCE module, DWORD threadId);
+BOOL UnhookWindowsHookEx(HHOOK hook);
+LRESULT CallNextHookEx(HHOOK hook, int code, WPARAM wParam, LPARAM lParam);
+DWORD GetCurrentThreadId(void);
+BOOL ClipCursor(const RECT *rect);
+BOOL GetClipCursor(RECT *rect);
+void mouse_event(DWORD flags, DWORD x, DWORD y, DWORD data, DWORD extraInfo);
+
+/* Port side of the message emulation, called by the platform layer. */
+void SGPSetWindowProc(WNDPROC proc);
+typedef void (*SGPPumpProc)(BOOL wait);
+extern SGPPumpProc gpSGPPumpEvents;
+void SGPCallKeyboardHook(DWORD virtualKey, DWORD keyData);
+void SGPCallMouseHook(UINT message, LONG x, LONG y);
+/* The cursor clip rectangle ClipCursor set, or FALSE when the cursor is
+   free; the platform layer applies it to the reported mouse position. */
+BOOL SGPGetCursorClip(RECT *rect);
+/* Position mouse_event asked for; the platform layer warps to it. */
+typedef void (*SGPWarpMouseProc)(LONG x, LONG y);
+extern SGPWarpMouseProc gpSGPWarpMouse;
+
+/* Multimedia timers. */
+MMRESULT timeGetDevCaps(TIMECAPS *caps, UINT size);
+MMRESULT timeSetEvent(UINT delay, UINT resolution, LPTIMECALLBACK proc, DWORD user, UINT flags);
+MMRESULT timeKillEvent(UINT id);
+DWORD timeGetTime(void);
+
+/* INI files (Ja2.ini, sgp.ini), with Windows paths. */
+DWORD GetPrivateProfileString(LPCSTR section, LPCSTR key, LPCSTR defaultValue, LPSTR buffer,
+                              DWORD size, LPCSTR fileName);
+UINT GetPrivateProfileInt(LPCSTR section, LPCSTR key, int defaultValue, LPCSTR fileName);
+BOOL WritePrivateProfileString(LPCSTR section, LPCSTR key, LPCSTR value, LPCSTR fileName);
 
 int _stricmp(const char *left, const char *right);
 int _strnicmp(const char *left, const char *right, size_t count);

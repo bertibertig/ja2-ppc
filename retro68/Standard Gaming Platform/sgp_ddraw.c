@@ -40,7 +40,6 @@ struct SGPDDSurface
 static SGPDDObject gDirectDraw;
 const int IID_IDirectDrawSurface2 = 2;
 const int IID_IDirectDraw2 = 1;
-BOOLEAN gfDontUseDDBlits = FALSE;
 SGPDDPresentProc gpSGPDDPresent;
 
 /* The SGP's pixel format: RGB555 for 16-bit surfaces (see video.c). */
