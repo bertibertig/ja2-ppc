@@ -3,6 +3,9 @@
 @AGENTS.md
 @resources/PORT_HISTORY.md
 
+Status, findings, plan and open work: `docs/` (plan.md, findings.md,
+todo.md). Keep todo.md current when finishing or discovering work.
+
 `MAC_OS9_GAME_DEVELOPMENT.md` (git-ignored, local only) is the condensed
 Toolbox reference; read it before using an unfamiliar Toolbox API.
 
