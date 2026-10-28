@@ -46,6 +46,14 @@ python3 tools/machw.py autotest tests/autotest/smoke.txt \
 - `python3 tools/machw.py call TOOL '{json}'` issues raw MCP calls
   (e.g. `list_directory '{"machine":"powerbook-g3","path":"/"}'`).
 
+Comparing with the Windows original: take the same states in the
+reference (`winref` skill, same coordinates and waits; e.g.
+`tests/autotest/menu-compare.txt` mirrors a winref click sequence), then
+`python3 tools/compare_screens.py WIN.png MAC.png OUT` reports the share of
+matching pixels (5 bits per channel, one step tolerance), the differing
+32x32 areas and writes OUT-side.png (Windows | Mac | differences in
+magenta). Mouse cursors differ by position; everything else should match.
+
 Only ask the user to operate the Mac for things outside the app (control
 panels, Finder dialogs, hardware).
 

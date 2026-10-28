@@ -1,0 +1,24 @@
+# Main menu states for comparison with the Windows reference (winref skill):
+# same coordinates and timing as .winref-out/menucheck/win-*.png.
+timeout 180
+wait 6000
+expect main
+shot menu
+move 318 397
+wait 1500
+shot hover_credits
+click 318 397
+wait 3000
+expect credits
+shot credits
+wait 4000
+shot credits_later
+key Escape
+wait 2500
+expect main
+shot menu_back
+click 318 286
+wait 3000
+expect difficulty
+shot difficulty
+quit
