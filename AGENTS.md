@@ -58,6 +58,18 @@ repository's `ja2/Build/` path beneath `retro68/`.
 - Keep platform-specific Mac OS 9, SDL2/QuickDraw, Sound Manager, file, and
   event code behind the smallest practical platform interface.
 
+## Port Architecture
+
+The port compiles the original game sources on top of a Mac OS 9
+reimplementation of the Standard Gaming Platform, instead of hand-writing
+each screen. Original game files are copied into their mapped `retro68/`
+paths and changed only behind `#ifdef JA2_PPC`; the SGP lives under
+`retro68/Standard Gaming Platform/` with the original file names. All
+little-endian on-disk formats (SLF, STCI, maps, `.edt`, save games) are
+byte-swapped explicitly at their load/save sites. The current hand-written
+menu, credits and laptop screens are replaced once the original screen runs
+on the new SGP. `ja2-master/` is never edited.
+
 ## Original Source Requirement
 
 Before implementing, translating, or modifying any feature, always reference
