@@ -30,7 +30,7 @@ the ~270k lines of original game code, so the port moves to this model:
 ## Tooling
 
 - Skills in `.claude/skills/`: `ja2-build`, `mac-hw-test`, `os9-emu`,
-  `ja2-profile`.
+  `ja2-profile`, `winref` (original Windows game as behavior reference).
 - MCP `classic-mac-hardware` (`.mcp.json`) deploys to the real PowerBook G3
   Lombard (Mac OS 9.2.2). Emulators are for functional smoke tests only;
   every feature and every performance number is accepted on the real Mac.

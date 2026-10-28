@@ -5,4 +5,5 @@
 /machines.json
 /.emu-out/
 /.hw-out/
+/.winref-out/
 /local.env
