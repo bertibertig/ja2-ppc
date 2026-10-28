@@ -42,8 +42,13 @@ static Boolean gMenuBackgroundLoaded = 0;
 static Boolean gMenuButtonsLoaded = 0;
 SDL_Surface *gMenuSurface;
 static SDL_Surface *gCreditsSurface;
+static SDL_Surface *gCreditsBackgroundSurface;
 static SDL_Surface *gVideoSurface;
-static SDL_Surface *gPresentSurface;
+static SDL_Surface *gFPSOverlaySurface;
+static unsigned char *gMenuButtonData;
+static Uint16 gMenuButtonPalette[256];
+static unsigned char *gCreditsFacesData;
+static unsigned long gCreditsFacesDataLength;
 Boolean gActionScreenNeedsRender = 0;
 static short gMenuButton = -1;
 static short gMenuHoverButton = -1;
@@ -69,6 +74,8 @@ static Boolean gMouseMotionNeedsPresent;
 static Uint32 gFPSTicks;
 static unsigned long gFPSFrames;
 static unsigned short gFPSValue;
+static unsigned short gFPSOverlayValue = 0xffff;
+static Boolean gScreenNeedsPresent;
 
 short gMenuScreen = MENU_SCREEN_MAIN;
 void RestoreMainMenu(void);
@@ -117,6 +124,7 @@ static const char *gCredits[] = {
     "Ported to Macintosh PPC", "by BertisRetroKeller."
 };
 static const short gCreditsCount = sizeof(gCredits) / sizeof(gCredits[0]);
+static SDL_Surface *gCreditsTextSurfaces[sizeof(gCredits) / sizeof(gCredits[0])];
 
 void DebugLog(const char *format, ...)
 {
@@ -303,6 +311,88 @@ static Boolean EnsureCreditsSurface(void)
     if (gCreditsSurface == NULL) {
         DebugLog("Credits: frame surface creation failed: %s", SDL_GetError());
         return 0;
+    }
+    return 1;
+}
+
+static Boolean EnsureCreditsBackground(void)
+{
+    if (gCreditsBackgroundSurface != NULL) {
+        return 1;
+    }
+    gCreditsBackgroundSurface = SDL_CreateRGBSurfaceWithFormat(0,
+        JA2_SCREEN_WIDTH, JA2_SCREEN_HEIGHT, 16, SDL_PIXELFORMAT_RGB555);
+    if (gCreditsBackgroundSurface == NULL) {
+        DebugLog("Credits: background cache creation failed: %s", SDL_GetError());
+        return 0;
+    }
+    if (!RenderIndexedBackground(gCreditsBackgroundSurface, "Interface.slf",
+                                 "CREDITS.STI")) {
+        DebugLog("Credits: background cache decode failed");
+        SDL_FreeSurface(gCreditsBackgroundSurface);
+        gCreditsBackgroundSurface = NULL;
+        return 0;
+    }
+    DebugLog("Credits: cached decoded background surface");
+    return 1;
+}
+
+static void ReleaseCreditsTextSurfaces(void)
+{
+    short index;
+
+    for (index = 0; index < gCreditsCount; ++index) {
+        if (gCreditsTextSurfaces[index] != NULL) {
+            SDL_FreeSurface(gCreditsTextSurfaces[index]);
+            gCreditsTextSurfaces[index] = NULL;
+        }
+    }
+}
+
+static Boolean EnsureCreditsTextSurfaces(void)
+{
+    short index;
+    Boolean created = 0;
+
+    for (index = 0; index < gCreditsCount; ++index) {
+        short size = (index == 0 || index == 3 || index == 10 ||
+                      index == 17 || index == 19) ? 14 : 12;
+        Uint16 color = (size == 14) ? JA2_COLOR_RED : JA2_COLOR_WHITE;
+        short width;
+        short x;
+
+        if (gCreditsTextSurfaces[index] != NULL) {
+            continue;
+        }
+        created = 1;
+        gCreditsTextSurfaces[index] = SDL_CreateRGBSurfaceWithFormat(
+            0, 210, 24, 16, SDL_PIXELFORMAT_RGB555);
+        if (gCreditsTextSurfaces[index] == NULL) {
+            DebugLog("Credits: text cache surface creation failed line=%d: %s",
+                     index, SDL_GetError());
+            ReleaseCreditsTextSurfaces();
+            return 0;
+        }
+        SDL_FillRect(gCreditsTextSurfaces[index], NULL, JA2_RGB555(255, 255, 255));
+        if (SDL_SetColorKey(gCreditsTextSurfaces[index], 1,
+                            JA2_RGB555(255, 255, 255)) != 0) {
+            DebugLog("Credits: text cache color key failed line=%d: %s", index,
+                     SDL_GetError());
+            ReleaseCreditsTextSurfaces();
+            return 0;
+        }
+        width = JA2TextWidth(gCredits[index], size);
+        if (width < 0 || width > 210) {
+            DebugLog("Credits: text cache width invalid line=%d width=%d", index,
+                     width);
+            ReleaseCreditsTextSurfaces();
+            return 0;
+        }
+        x = (short)((210 - width) / 2);
+        JA2DrawText(gCreditsTextSurfaces[index], x, 0, gCredits[index], color, size);
+    }
+    if (created) {
+        DebugLog("Credits: cached %d text surfaces", gCreditsCount);
     }
     return 1;
 }
@@ -649,8 +739,7 @@ static Boolean RenderStartupSplash(void)
     return 1;
 }
 
-static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
-                                      short highlightedButton)
+static Boolean EnsureMenuButtonData(void)
 {
     static const unsigned short objectIndex[][2] = {
         { 0, 1 }, { 3, 4 }, { 7, 8 }, { 10, 11 }, { 14, 15 }
@@ -659,11 +748,72 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
     const char *archiveName;
     const char *buttonFileName;
     unsigned char *fileData;
-    unsigned char header[64];
-    unsigned char palette[768];
-    unsigned char *pixels;
     unsigned long fileOffset;
     unsigned long fileLength;
+    unsigned long storedSize;
+    unsigned short objectCount;
+    unsigned short paletteIndex;
+
+    if (gMenuButtonData != NULL) {
+        return 1;
+    }
+#if defined(JA2_LANGUAGE_GERMAN)
+    archiveName = "German.slf";
+    buttonFileName = "TITLETEXT_GERMAN.STI";
+#else
+    archiveName = "LoadScreens.slf";
+    buttonFileName = "TITLETEXT.STI";
+#endif
+    archive = JA2SLFOpen(archiveName);
+    if (archive == NULL || !JA2SLFFind(archive, buttonFileName, &fileOffset,
+                                       &fileLength)) {
+        if (archive != NULL) {
+            JA2SLFClose(archive);
+        }
+        DebugLog("Menu loader: %s not found in %s", buttonFileName, archiveName);
+        return 0;
+    }
+    fileData = (unsigned char *)malloc(fileLength);
+    if (fileData == NULL || fileLength < 64 + 768 + 16 ||
+        !JA2SLFRead(archive, fileOffset, fileData, fileLength)) {
+        free(fileData);
+        JA2SLFClose(archive);
+        DebugLog("Menu loader: cannot cache %s length=%lu", buttonFileName,
+                 fileLength);
+        return 0;
+    }
+    JA2SLFClose(archive);
+    storedSize = ReadLittleEndian32(&fileData[8]);
+    objectCount = ReadLittleEndian16(&fileData[28]);
+    if (memcmp(fileData, "STCI", 4) != 0 || objectCount == 0 ||
+        objectCount <= objectIndex[4][1] ||
+        ReadLittleEndian32(&fileData[24]) != 256 ||
+        fileLength < 64 + 768 + (unsigned long)objectCount * 16 + storedSize) {
+        DebugLog("Menu loader: invalid cached %s objects=%u", buttonFileName,
+                 objectCount);
+        free(fileData);
+        return 0;
+    }
+    for (paletteIndex = 0; paletteIndex < 256; ++paletteIndex) {
+        gMenuButtonPalette[paletteIndex] = JA2_RGB555(
+            fileData[64 + paletteIndex * 3],
+            fileData[64 + paletteIndex * 3 + 1],
+            fileData[64 + paletteIndex * 3 + 2]);
+    }
+    gMenuButtonData = fileData;
+    DebugLog("Menu loader: cached %s length=%lu objects=%u", buttonFileName,
+             fileLength, objectCount);
+    return 1;
+}
+
+static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
+                                      short highlightedButton)
+{
+    static const unsigned short objectIndex[][2] = {
+        { 0, 1 }, { 3, 4 }, { 7, 8 }, { 10, 11 }, { 14, 15 }
+    };
+    unsigned char *fileData;
+    unsigned char *pixels;
     unsigned long storedSize;
     unsigned long dataOffset;
     unsigned long dataLength;
@@ -678,52 +828,18 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
     unsigned short paletteIndex;
     short offsetX;
     short offsetY;
-    RGBColor color;
     SDL_Surface *destination;
     unsigned char *source;
 
-#if defined(JA2_LANGUAGE_GERMAN)
-    archiveName = "German.slf";
-    buttonFileName = "TITLETEXT_GERMAN.STI";
-#else
-    archiveName = "LoadScreens.slf";
-    buttonFileName = "TITLETEXT.STI";
-#endif
-    archive = JA2SLFOpen(archiveName);
-    if (archive == NULL || !JA2SLFFind(archive, buttonFileName, &fileOffset,
-                                       &fileLength)) {
-        if (archive != NULL) JA2SLFClose(archive);
-        DebugLog("Menu loader: %s not found in %s", buttonFileName, archiveName);
+    if (!EnsureMenuButtonData()) {
         return 0;
     }
-    fileData = (unsigned char *)malloc(fileLength);
-    if (fileData == NULL || fileLength < 64 + 768 + 16 ||
-        !JA2SLFRead(archive, fileOffset, fileData, fileLength)) {
-        free(fileData);
-        JA2SLFClose(archive);
-        return 0;
-    }
-    JA2SLFClose(archive);
-    memcpy(header, fileData, sizeof(header));
-    if (memcmp(header, "STCI", 4) != 0 ||
-        !(ReadLittleEndian32(&header[16]) & 0x0008) ||
-        !(ReadLittleEndian32(&header[16]) & 0x0020)) {
-        free(fileData);
-        return 0;
-    }
-    storedSize = ReadLittleEndian32(&header[8]);
-    objectCount = ReadLittleEndian16(&header[28]);
-    if (objectCount == 0 || objectCount <= objectIndex[4][1] ||
-        ReadLittleEndian32(&header[24]) != 256 ||
-        fileLength < 64 + 768 + (unsigned long)objectCount * 16 + storedSize) {
-        free(fileData);
-        return 0;
-    }
-    memcpy(palette, fileData + 64, sizeof(palette));
+    fileData = gMenuButtonData;
+    storedSize = ReadLittleEndian32(&fileData[8]);
+    objectCount = ReadLittleEndian16(&fileData[28]);
     pixels = fileData + 64 + 768 + (unsigned long)objectCount * 16;
     destination = GetMenuRenderSurface();
     if (destination == NULL) {
-        free(fileData);
         return 0;
     }
     for (item = (unsigned short)firstButton; item <= (unsigned short)lastButton; ++item) {
@@ -736,8 +852,7 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
         imageHeight = ReadLittleEndian16(&object[12]);
         imageWidth = ReadLittleEndian16(&object[14]);
         if (dataOffset + dataLength > storedSize || imageWidth == 0 ||
-            imageHeight == 0) {
-            free(fileData);
+        imageHeight == 0) {
             return 0;
         }
         source = pixels + dataOffset;
@@ -749,7 +864,6 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
                 if (control == 0) break;
                 run = (unsigned short)(control & 0x7f);
                 if (run == 0 || x + run > imageWidth) {
-                    free(fileData);
                     return 0;
                 }
                 if (control & 0x80) {
@@ -757,18 +871,14 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
                 } else {
                     if ((unsigned long)(source - (pixels + dataOffset)) + run >
                         dataLength) {
-                        free(fileData);
                         return 0;
                     }
                     while (run-- != 0) {
                         paletteIndex = *source++;
-                        color.red = (unsigned short)(palette[paletteIndex * 3] << 8);
-                        color.green = (unsigned short)(palette[paletteIndex * 3 + 1] << 8);
-                        color.blue = (unsigned short)(palette[paletteIndex * 3 + 2] << 8);
-                        WriteMenuPixel(destination,
+                        WriteRawPixel(destination,
                                        (short)(320 - imageWidth / 2 + offsetX + x),
                                        (short)(277 + item * 37 + offsetY + y),
-                                       &color);
+                                       gMenuButtonPalette[paletteIndex]);
                         ++x;
                     }
                 }
@@ -780,7 +890,6 @@ static Boolean RenderMenuButtonFrames(short firstButton, short lastButton,
             }
         }
     }
-    free(fileData);
     return 1;
 }
 
@@ -962,6 +1071,13 @@ static Boolean InstallCursorAsset(const char *archiveName, const char *entryName
         return 0;
     }
     SDL_FillRect(gCursorSurface, NULL, JA2_CURSOR_TRANSPARENT_KEY);
+    if (SDL_SetColorKey(gCursorSurface, 1, JA2_CURSOR_TRANSPARENT_KEY) != 0) {
+        DebugLog("Cursor loader: color key setup failed: %s", SDL_GetError());
+        SDL_FreeSurface(gCursorSurface);
+        gCursorSurface = NULL;
+        free(fileData);
+        return 0;
+    }
     gCursorWidth = (short)width;
     gCursorHeight = (short)height;
 
@@ -1010,20 +1126,6 @@ Boolean JA2InstallLaptopCursor(void)
     return InstallCursorAsset("Laptop.slf", "LAPTOPCURSOR.STI", "laptop cursor");
 }
 
-static Boolean EnsurePresentSurface(void)
-{
-    if (gPresentSurface != NULL) {
-        return 1;
-    }
-    gPresentSurface = SDL_CreateRGBSurfaceWithFormat(0, JA2_SCREEN_WIDTH,
-        JA2_SCREEN_HEIGHT, 16, SDL_PIXELFORMAT_RGB555);
-    if (gPresentSurface == NULL) {
-        DebugLog("Renderer: present surface creation failed: %s", SDL_GetError());
-        return 0;
-    }
-    return 1;
-}
-
 static void DrawCursorOverlay(SDL_Surface *destination)
 {
     int mouseX;
@@ -1032,8 +1134,8 @@ static void DrawCursorOverlay(SDL_Surface *destination)
     int sourceY;
     int width;
     int height;
-    int row;
-    int column;
+    SDL_Rect sourceRect;
+    SDL_Rect destinationRect;
 
     if (gCursorSurface == NULL || destination == NULL ||
         gMenuScreen == MENU_SCREEN_INTRO) {
@@ -1053,49 +1155,86 @@ static void DrawCursorOverlay(SDL_Surface *destination)
     if (width <= 0 || height <= 0) {
         return;
     }
-    if (SDL_MUSTLOCK(gCursorSurface)) {
-        SDL_LockSurface(gCursorSurface);
+    sourceRect.x = sourceX;
+    sourceRect.y = sourceY;
+    sourceRect.w = width;
+    sourceRect.h = height;
+    destinationRect.x = mouseX < 0 ? 0 : mouseX;
+    destinationRect.y = mouseY < 0 ? 0 : mouseY;
+    destinationRect.w = width;
+    destinationRect.h = height;
+    if (SDL_BlitSurface(gCursorSurface, &sourceRect, destination,
+                        &destinationRect) != 0) {
+        DebugLog("Renderer: cursor blit failed: %s", SDL_GetError());
     }
-    if (SDL_MUSTLOCK(destination)) {
-        SDL_LockSurface(destination);
+}
+
+static Boolean EnsureFPSOverlay(void)
+{
+    if (gFPSOverlaySurface != NULL) {
+        return 1;
     }
-    for (row = 0; row < height; ++row) {
-        Uint16 *sourceRow = (Uint16 *)((Uint8 *)gCursorSurface->pixels +
-            (long)(sourceY + row) * gCursorSurface->pitch) + sourceX;
-        Uint16 *destinationRow = (Uint16 *)((Uint8 *)destination->pixels +
-            (long)(mouseY + row) * destination->pitch) + mouseX;
-        for (column = 0; column < width; ++column) {
-            Uint16 pixel = sourceRow[column];
-            if (pixel != JA2_CURSOR_TRANSPARENT_KEY) {
-                destinationRow[column] = pixel;
-            }
-        }
+    gFPSOverlaySurface = SDL_CreateRGBSurfaceWithFormat(0, 104, 24, 16,
+                                                         SDL_PIXELFORMAT_RGB555);
+    if (gFPSOverlaySurface == NULL) {
+        DebugLog("Performance: FPS overlay creation failed: %s", SDL_GetError());
+        return 0;
     }
-    if (SDL_MUSTLOCK(destination)) {
-        SDL_UnlockSurface(destination);
+    SDL_FillRect(gFPSOverlaySurface, NULL, JA2_RGB555(255, 255, 255));
+    if (SDL_SetColorKey(gFPSOverlaySurface, 1, JA2_RGB555(255, 255, 255)) != 0) {
+        DebugLog("Performance: FPS overlay color key failed: %s", SDL_GetError());
+        SDL_FreeSurface(gFPSOverlaySurface);
+        gFPSOverlaySurface = NULL;
+        return 0;
     }
-    if (SDL_MUSTLOCK(gCursorSurface)) {
-        SDL_UnlockSurface(gCursorSurface);
+    return 1;
+}
+
+static void RecordPresentedFrame(void)
+{
+    Uint32 now;
+    Uint32 elapsed;
+    unsigned long frames;
+
+    if (!JA2OptionsShowFPS()) {
+        return;
+    }
+    now = SDL_GetTicks();
+    if (gFPSTicks == 0) {
+        gFPSTicks = now;
+    }
+    ++gFPSFrames;
+    elapsed = now - gFPSTicks;
+    if (elapsed >= 1000) {
+        frames = gFPSFrames;
+        gFPSValue = (unsigned short)((gFPSFrames * 1000) / elapsed);
+        gFPSFrames = 0;
+        gFPSTicks = now;
+        gFPSOverlayValue = 0xffff;
+        DebugLog("Performance: fps=%u successful_presents=%lu", gFPSValue,
+                 frames);
     }
 }
 
 static void DrawFPSCounter(SDL_Surface *destination)
 {
-    Uint32 now;
     char text[24];
+    SDL_Rect overlayRect;
 
-    if (!JA2OptionsShowFPS() || destination == NULL) return;
-    now = SDL_GetTicks();
-    if (gFPSTicks == 0) gFPSTicks = now;
-    ++gFPSFrames;
-    if (now - gFPSTicks >= 1000) {
-        gFPSValue = (unsigned short)((gFPSFrames * 1000) / (now - gFPSTicks));
-        gFPSFrames = 0;
-        gFPSTicks = now;
-        DebugLog("Performance: fps=%u", gFPSValue);
+    if (!JA2OptionsShowFPS() || destination == NULL || !EnsureFPSOverlay()) {
+        return;
     }
-    sprintf(text, "FPS: %u", gFPSValue);
-    JA2DrawText(destination, 4, 3, text, JA2_COLOR_RED, 12);
+    if (gFPSOverlayValue != gFPSValue) {
+        SDL_FillRect(gFPSOverlaySurface, NULL, JA2_RGB555(255, 255, 255));
+        sprintf(text, "FPS: %u", gFPSValue);
+        JA2DrawText(gFPSOverlaySurface, 4, 3, text, JA2_COLOR_RED, 12);
+        gFPSOverlayValue = gFPSValue;
+    }
+    overlayRect.x = 0;
+    overlayRect.y = 0;
+    overlayRect.w = gFPSOverlaySurface->w;
+    overlayRect.h = gFPSOverlaySurface->h;
+    SDL_BlitSurface(gFPSOverlaySurface, NULL, destination, &overlayRect);
 }
 
 void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
@@ -1105,27 +1244,28 @@ void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
     if (surface == NULL || gWindow == NULL) {
         return;
     }
-    if (!EnsurePresentSurface()) {
-        return;
-    }
     windowSurface = SDL_GetWindowSurface(gWindow);
     if (windowSurface == NULL) {
         DebugLog("Renderer: %s SDL_GetWindowSurface failed: %s", name, SDL_GetError());
         return;
     }
-    if (SDL_BlitSurface(surface, NULL, gPresentSurface, NULL) != 0) {
-        DebugLog("Renderer: %s RGB555 present copy failed: %s", name, SDL_GetError());
-        return;
-    }
-    DrawFPSCounter(gPresentSurface);
-    DrawCursorOverlay(gPresentSurface);
-    if (SDL_BlitSurface(gPresentSurface, NULL, windowSurface, NULL) != 0) {
+    /* The source is already a fixed RGB555 composition surface. Let SDL do
+       the single final format conversion instead of copying the whole frame
+       through a second RGB555 surface first. */
+    if (SDL_BlitSurface(surface, NULL, windowSurface, NULL) != 0) {
         DebugLog("Renderer: %s SDL_BlitSurface failed: %s", name, SDL_GetError());
         return;
     }
+    DrawFPSCounter(windowSurface);
+    DrawCursorOverlay(windowSurface);
     if (SDL_UpdateWindowSurface(gWindow) != 0) {
         DebugLog("Renderer: %s SDL_UpdateWindowSurface failed: %s", name, SDL_GetError());
+        return;
     }
+    SDL_GetMouseState(&gLastMouseX, &gLastMouseY);
+    gMouseMotionNeedsPresent = 0;
+    gScreenNeedsPresent = 0;
+    RecordPresentedFrame();
 }
 
 Boolean JA2PresentVideoWorld(GWorldPtr world)
@@ -1158,10 +1298,15 @@ Boolean JA2PresentVideoWorld(GWorldPtr world)
     source = (unsigned char *)GetPixBaseAddr(pixMap);
     destination = (unsigned char *)gVideoSurface->pixels;
     sourceRowBytes = (**pixMap).rowBytes & 0x3fff;
-    for (row = 0; row < JA2_SCREEN_HEIGHT; ++row) {
-        memcpy(destination + (long)row * gVideoSurface->pitch,
-               source + (long)row * sourceRowBytes,
-               JA2_SCREEN_WIDTH * 2);
+    if (sourceRowBytes == JA2_SCREEN_WIDTH * 2 &&
+        gVideoSurface->pitch == JA2_SCREEN_WIDTH * 2) {
+        memcpy(destination, source, JA2_SCREEN_WIDTH * JA2_SCREEN_HEIGHT * 2);
+    } else {
+        for (row = 0; row < JA2_SCREEN_HEIGHT; ++row) {
+            memcpy(destination + (long)row * gVideoSurface->pitch,
+                   source + (long)row * sourceRowBytes,
+                   JA2_SCREEN_WIDTH * 2);
+        }
     }
     if (SDL_MUSTLOCK(gVideoSurface)) {
         SDL_UnlockSurface(gVideoSurface);
@@ -1320,14 +1465,61 @@ static Boolean RenderMainMenuBackground(void)
     return RenderIndexedBackground(gMenuSurface, "LoadScreens.slf", "MAINMENUBACKGROUND.STI");
 }
 
-/* The original credits use the first image in each three-frame face group. */
-static Boolean RenderCreditFaces(void)
+static Boolean EnsureCreditsFaceData(void)
 {
     JA2SLFArchive *archive;
     unsigned char *fileData;
+    unsigned long offset;
+    unsigned long length;
+    unsigned long storedSize;
+    unsigned short count;
+
+    if (gCreditsFacesData != NULL) {
+        return 1;
+    }
+    archive = JA2SLFOpen("Interface.slf");
+    if (archive == NULL || !JA2SLFFind(archive, "CREDIT FACES.STI", &offset,
+                                        &length)) {
+        DebugLog("Credits: Credit Faces.sti unavailable");
+        if (archive != NULL) {
+            JA2SLFClose(archive);
+        }
+        return 0;
+    }
+    fileData = (unsigned char *)malloc(length);
+    if (fileData == NULL || !JA2SLFRead(archive, offset, fileData, length)) {
+        DebugLog("Credits: cannot cache Credit Faces.sti length=%lu", length);
+        free(fileData);
+        JA2SLFClose(archive);
+        return 0;
+    }
+    JA2SLFClose(archive);
+    if (length < 64 + 768 || memcmp(fileData, "STCI", 4) != 0) {
+        DebugLog("Credits: invalid Credit Faces.sti header");
+        free(fileData);
+        return 0;
+    }
+    storedSize = ReadLittleEndian32(&fileData[8]);
+    count = ReadLittleEndian16(&fileData[28]);
+    if (count < 45 || length < 64 + 768 + (unsigned long)count * 16 + storedSize) {
+        DebugLog("Credits: invalid Credit Faces.sti objects=%u length=%lu stored=%lu",
+                 count, length, storedSize);
+        free(fileData);
+        return 0;
+    }
+    gCreditsFacesData = fileData;
+    gCreditsFacesDataLength = length;
+    DebugLog("Credits: cached Credit Faces.sti length=%lu objects=%u", length, count);
+    return 1;
+}
+
+/* The original credits use the first image in each three-frame face group. */
+static Boolean RenderCreditFaces(void)
+{
+    unsigned char *fileData;
     unsigned char palette[768];
     unsigned char *pixels;
-    unsigned long offset, length, storedSize, dataOffset, dataLength;
+    unsigned long length, storedSize, dataOffset, dataLength;
     unsigned short count, face, x, y, run, imageWidth, imageHeight, paletteIndex;
     short offsetX, offsetY;
     unsigned char control;
@@ -1335,27 +1527,12 @@ static Boolean RenderCreditFaces(void)
     const unsigned char *source;
     RGBColor color;
 
-    archive = JA2SLFOpen("Interface.slf");
-    if (archive == NULL || !JA2SLFFind(archive, "CREDIT FACES.STI", &offset, &length)) {
-        DebugLog("Credits: Credit Faces.sti unavailable");
-        if (archive != NULL) JA2SLFClose(archive);
-        return 0;
-    }
-    fileData = (unsigned char *)malloc(length);
-    if (fileData == NULL || !JA2SLFRead(archive, offset, fileData, length)) {
-        free(fileData);
-        JA2SLFClose(archive);
-        return 0;
-    }
-    JA2SLFClose(archive);
-    if (length < 64 + 768 || memcmp(fileData, "STCI", 4) != 0) {
-        free(fileData);
-        return 0;
-    }
+    if (!EnsureCreditsFaceData()) return 0;
+    fileData = gCreditsFacesData;
+    length = gCreditsFacesDataLength;
     storedSize = ReadLittleEndian32(&fileData[8]);
     count = ReadLittleEndian16(&fileData[28]);
     if (count < 45 || length < 64 + 768 + (unsigned long)count * 16 + storedSize) {
-        free(fileData);
         return 0;
     }
     memcpy(palette, fileData + 64, sizeof(palette));
@@ -1401,7 +1578,6 @@ static Boolean RenderCreditFaces(void)
             }
         }
     }
-    free(fileData);
     return 1;
 }
 
@@ -1410,10 +1586,12 @@ static void DrawCreditsScreen(void)
     short index;
     short y;
     Boolean anyEyesClosed = 0;
+    Boolean textCached;
 
-    if (!EnsureCreditsSurface()) return;
-    if (!RenderIndexedBackground(gCreditsSurface, "Interface.slf", "CREDITS.STI")) {
-        DebugLog("Credits: background render failed");
+    if (!EnsureCreditsSurface() || !EnsureCreditsBackground()) return;
+    textCached = EnsureCreditsTextSurfaces();
+    if (SDL_BlitSurface(gCreditsBackgroundSurface, NULL, gCreditsSurface, NULL) != 0) {
+        DebugLog("Credits: background cache blit failed: %s", SDL_GetError());
         return;
     }
     for (index = 0; index < 15; ++index) {
@@ -1427,9 +1605,15 @@ static void DrawCreditsScreen(void)
         Boolean heading = index == 0 || index == 3 || index == 10 || index == 17 || index == 19;
         y = (short)(479 + index * 16 - gCreditsScrollOffset);
         if (y < -18 || y > 480) continue;
-        DrawCreditsColumnString(gCreditsSurface, y, gCredits[index],
-                                heading ? JA2_COLOR_RED : JA2_COLOR_WHITE,
-                                heading ? 14 : 12);
+        if (textCached) {
+            SDL_Rect destination = { 10, y, 0, 0 };
+            SDL_BlitSurface(gCreditsTextSurfaces[index], NULL, gCreditsSurface,
+                            &destination);
+        } else {
+            DrawCreditsColumnString(gCreditsSurface, y, gCredits[index],
+                                    heading ? JA2_COLOR_RED : JA2_COLOR_WHITE,
+                                    heading ? 14 : 12);
+        }
     }
     if (gCreditsHoverFace >= 0) {
         DrawCenteredCString(gCreditsSurface, 420, gCreditFaces[gCreditsHoverFace].name, JA2_COLOR_WHITE);
@@ -1705,8 +1889,12 @@ static void UpdateMainMenuHover(void)
         }
         if (!rendered) {
             RenderMainMenuDirectly();
+        } else {
+            /* Coalesce the hover redraw with the cursor present at the end
+               of this loop. A mouse-motion event otherwise caused two full
+               640x480 copies in the same iteration. */
+            gScreenNeedsPresent = 1;
         }
-        JA2BlitMenuBackground();
     }
 }
 
@@ -1806,7 +1994,7 @@ static void HandleJA2Event(const SDL_Event *event)
     }
     case SDL_WINDOWEVENT:
         if (event->window.event == SDL_WINDOWEVENT_EXPOSED) {
-            PresentCurrentScreen();
+            gScreenNeedsPresent = 1;
         }
         break;
     default:
@@ -1839,10 +2027,13 @@ static void UpdateCursorPresentIfMoved(void)
     int mouseY;
 
     if (gMenuScreen == MENU_SCREEN_INTRO) {
+        gScreenNeedsPresent = 0;
+        gMouseMotionNeedsPresent = 0;
         return;
     }
     SDL_GetMouseState(&mouseX, &mouseY);
-    if (gMouseMotionNeedsPresent || mouseX != gLastMouseX || mouseY != gLastMouseY) {
+    if (gScreenNeedsPresent || gMouseMotionNeedsPresent ||
+        mouseX != gLastMouseX || mouseY != gLastMouseY) {
         gLastMouseX = mouseX;
         gLastMouseY = mouseY;
         gMouseMotionNeedsPresent = 0;
@@ -1926,6 +2117,11 @@ int main(int argc, char *argv[])
         SDL_FreeSurface(gCreditsSurface);
         gCreditsSurface = NULL;
     }
+    if (gCreditsBackgroundSurface != NULL) {
+        SDL_FreeSurface(gCreditsBackgroundSurface);
+        gCreditsBackgroundSurface = NULL;
+    }
+    ReleaseCreditsTextSurfaces();
     if (gCursorSurface != NULL) {
         SDL_FreeSurface(gCursorSurface);
         gCursorSurface = NULL;
@@ -1934,10 +2130,14 @@ int main(int argc, char *argv[])
         SDL_FreeSurface(gVideoSurface);
         gVideoSurface = NULL;
     }
-    if (gPresentSurface != NULL) {
-        SDL_FreeSurface(gPresentSurface);
-        gPresentSurface = NULL;
+    if (gFPSOverlaySurface != NULL) {
+        SDL_FreeSurface(gFPSOverlaySurface);
+        gFPSOverlaySurface = NULL;
     }
+    free(gMenuButtonData);
+    gMenuButtonData = NULL;
+    free(gCreditsFacesData);
+    gCreditsFacesData = NULL;
     JA2TextShutdown();
     JA2LaptopShutdown();
     JA2PPCIntroShutdown();

@@ -46,6 +46,10 @@ static unsigned char *gLaptopTitleFontData;
 static unsigned long gLaptopTitleFontLength;
 static unsigned long gLaptopTitleFontStoredSize;
 static unsigned short gLaptopTitleFontObjectCount;
+static unsigned char *gLaptopButtonsData;
+static unsigned long gLaptopButtonsLength;
+static unsigned char *gLaptopHelpScreenData;
+static unsigned long gLaptopHelpScreenLength;
 static unsigned char *gLaptopHelpTextData;
 static unsigned long gLaptopHelpTextLength;
 static Boolean gLaptopEntered;
@@ -118,6 +122,46 @@ static Boolean ReadArchiveEntry(const char *archiveName, const char *entryName,
     return 1;
 }
 
+static Boolean ReadCachedStiEntry(const char *archiveName, const char *entryName,
+                                  unsigned char **data, unsigned long *length,
+                                  Boolean *ownsData)
+{
+    unsigned char **cachedData = NULL;
+    unsigned long *cachedLength = NULL;
+
+    if (strcmp(archiveName, "Laptop.slf") == 0 &&
+        strcmp(entryName, "buttonsforlaptop.sti") == 0) {
+        cachedData = &gLaptopButtonsData;
+        cachedLength = &gLaptopButtonsLength;
+    } else if (strcmp(archiveName, "Interface.slf") == 0 &&
+               strcmp(entryName, "HelpScreen.sti") == 0) {
+        cachedData = &gLaptopHelpScreenData;
+        cachedLength = &gLaptopHelpScreenLength;
+    }
+    if (cachedData == NULL) {
+        *ownsData = 1;
+        return ReadArchiveEntry(archiveName, entryName, data, length);
+    }
+    if (*cachedData == NULL) {
+        if (!ReadArchiveEntry(archiveName, entryName, cachedData, cachedLength)) {
+            return 0;
+        }
+        DebugLog("Laptop asset: cached %s from %s length=%lu", entryName,
+                 archiveName, *cachedLength);
+    }
+    *data = *cachedData;
+    *length = *cachedLength;
+    *ownsData = 0;
+    return 1;
+}
+
+static void ReleaseStiData(unsigned char *data, Boolean ownsData)
+{
+    if (ownsData) {
+        free(data);
+    }
+}
+
 static Boolean DrawStiObject(SDL_Surface *destination, const char *archiveName,
                              const char *entryName, unsigned short objectIndex,
                              short destinationX, short destinationY)
@@ -139,15 +183,17 @@ static Boolean DrawStiObject(SDL_Surface *destination, const char *archiveName,
     unsigned short run;
     unsigned char control;
     Boolean result = 0;
+    Boolean ownsData;
 
-    if (!ReadArchiveEntry(archiveName, entryName, &fileData, &fileLength)) {
+    if (!ReadCachedStiEntry(archiveName, entryName, &fileData, &fileLength,
+                            &ownsData)) {
         return 0;
     }
     if (fileLength < 64 + 768 + 16 || memcmp(fileData, "STCI", 4) != 0 ||
         !(ReadLE32(&fileData[16]) & 0x0008) ||
         !(ReadLE32(&fileData[16]) & 0x0020) || ReadLE32(&fileData[24]) != 256) {
         DebugLog("Laptop asset: unsupported STI %s", entryName);
-        free(fileData);
+        ReleaseStiData(fileData, ownsData);
         return 0;
     }
     storedSize = ReadLE32(&fileData[8]);
@@ -156,7 +202,7 @@ static Boolean DrawStiObject(SDL_Surface *destination, const char *archiveName,
         fileLength < 64 + 768 + objectCount * 16 + storedSize) {
         DebugLog("Laptop asset: invalid STI object=%u count=%lu %s",
                  objectIndex, objectCount, entryName);
-        free(fileData);
+        ReleaseStiData(fileData, ownsData);
         return 0;
     }
     object = fileData + 64 + 768 + (unsigned long)objectIndex * 16;
@@ -168,7 +214,7 @@ static Boolean DrawStiObject(SDL_Surface *destination, const char *archiveName,
         dataLength > storedSize - dataOffset) {
         DebugLog("Laptop asset: invalid STI object dimensions=%ux%u %s",
                  width, height, entryName);
-        free(fileData);
+        ReleaseStiData(fileData, ownsData);
         return 0;
     }
     memcpy(palette, fileData + 64, sizeof(palette));
@@ -221,7 +267,7 @@ draw_sti_done:
     if (SDL_MUSTLOCK(destination)) {
         SDL_UnlockSurface(destination);
     }
-    free(fileData);
+    ReleaseStiData(fileData, ownsData);
     if (!result) {
         DebugLog("Laptop asset: malformed ETRLE data in %s object=%u",
                  entryName, objectIndex);
@@ -1059,9 +1105,29 @@ void JA2LaptopShutdown(void)
         SDL_FreeSurface(gLaptopHelpExit);
         gLaptopHelpExit = NULL;
     }
+    if (gLaptopHelpArrowUp != NULL) {
+        SDL_FreeSurface(gLaptopHelpArrowUp);
+        gLaptopHelpArrowUp = NULL;
+    }
+    if (gLaptopHelpArrowDown != NULL) {
+        SDL_FreeSurface(gLaptopHelpArrowDown);
+        gLaptopHelpArrowDown = NULL;
+    }
     if (gLaptopFontData != NULL) {
         free(gLaptopFontData);
         gLaptopFontData = NULL;
+    }
+    if (gLaptopTitleFontData != NULL) {
+        free(gLaptopTitleFontData);
+        gLaptopTitleFontData = NULL;
+    }
+    if (gLaptopButtonsData != NULL) {
+        free(gLaptopButtonsData);
+        gLaptopButtonsData = NULL;
+    }
+    if (gLaptopHelpScreenData != NULL) {
+        free(gLaptopHelpScreenData);
+        gLaptopHelpScreenData = NULL;
     }
     gLaptopEntered = 0;
     gLaptopWelcomeVisible = 0;

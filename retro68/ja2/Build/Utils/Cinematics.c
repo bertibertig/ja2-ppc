@@ -25,6 +25,8 @@ struct JA2PPCVideo {
     unsigned long pollCount;
     unsigned long lastPollTicks;
     unsigned long delayedPolls;
+    TimeValue lastPresentedMovieTime;
+    Boolean hasPresentedFrame;
 };
 
 static GWorldPtr gVideoFrameWorld;
@@ -150,6 +152,8 @@ JA2PPCVideo *JA2PPCVideoOpen(const char *archiveName, const char *entryName)
 Boolean JA2PPCVideoPoll(JA2PPCVideo *video)
 {
     unsigned long now;
+    TimeRecord movieTimeRecord;
+    TimeValue movieTime;
 
     if (video == NULL || video->movie == NULL || video->done) return 0;
     now = (unsigned long)TickCount();
@@ -160,7 +164,13 @@ Boolean JA2PPCVideoPoll(JA2PPCVideo *video)
     video->lastPollTicks = now;
     ++video->pollCount;
     MoviesTask(video->movie, JA2_MOVIE_TASK_BUDGET_MS);
-    JA2PresentVideoWorld(gVideoFrameWorld);
+    movieTime = GetMovieTime(video->movie, &movieTimeRecord);
+    if (!video->hasPresentedFrame || movieTime != video->lastPresentedMovieTime) {
+        if (JA2PresentVideoWorld(gVideoFrameWorld)) {
+            video->lastPresentedMovieTime = movieTime;
+            video->hasPresentedFrame = 1;
+        }
+    }
     video->done = IsMovieDone(video->movie);
     if ((video->pollCount % 120) == 0) {
         DebugLog("Video: polls=%lu delayed=%lu", video->pollCount,

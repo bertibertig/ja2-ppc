@@ -98,8 +98,10 @@ the normal intro flow. The option is loaded once at startup and recorded in
 `JA2PPC-Debug.log`.
 
 The runtime FPS overlay is enabled by default. Set `show_fps=0` to disable it;
-the same true-value syntax is accepted for enabling it. The measured value and
-the active setting are recorded in `JA2PPC-Debug.log`.
+the same true-value syntax is accepted for enabling it. The value counts
+successful window presents in the current shell, not simulation or tactical
+game frames. The measured value and the active setting are recorded in
+`JA2PPC-Debug.log`.
 
 When `JA2_DATA_DIR` is configured, the build extracts the four beginning-game
 Smacker files from `Data/Intro.slf` and converts them to cached 640x480 MOV
