@@ -2,11 +2,10 @@
 #define JA2_PPC_CINEMATICS_H
 
 #include <Quickdraw.h>
-#include <QDOffscreen.h>
 
 typedef struct JA2PPCVideo JA2PPCVideo;
 
-Boolean JA2PPCVideoInitialize(void *window, GWorldPtr frameWorld);
+Boolean JA2PPCVideoInitialize(void);
 JA2PPCVideo *JA2PPCVideoOpen(const char *archiveName, const char *entryName);
 Boolean JA2PPCVideoPoll(JA2PPCVideo *video);
 void JA2PPCVideoUpdate(JA2PPCVideo *video);

@@ -43,7 +43,7 @@ typedef struct {
 
 static const char *gZoneNames[JA2_PROF_COLUMNS] = {
     "events", "logic", "audio", "video", "render", "blit", "present",
-    "decode", "file", "idle", "frame"
+    "decode", "file", "idle", "movie", "frame"
 };
 
 static Boolean gProfActive;

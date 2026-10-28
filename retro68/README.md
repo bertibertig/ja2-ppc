@@ -103,12 +103,9 @@ successful window presents in the current shell, not simulation or tactical
 game frames. The measured value and the active setting are recorded in
 `JA2PPC-Debug.log`.
 
-When `JA2_DATA_DIR` is configured, the build extracts the four beginning-game
-Smacker files from `Data/Intro.slf` and converts them to cached 640x480 MOV
-files under `Data/Intro/` in the bundle. FFmpeg is required for this step.
-The cache is reused by normal incremental builds; use `cmake --build
-retro68/build-german-debug --clean-first` only when a deliberate full rebuild
-is needed.
+The intro movies are played directly from the original `Data/Intro.slf`
+Smacker files by `Smacker/smacker.c` (native 15 fps, original audio); no host
+conversion step and no QuickTime are involved.
 
 ## Remaining port work
 

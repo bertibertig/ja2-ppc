@@ -124,8 +124,15 @@ rendering or event-loop code.
   `SDL_UpdateWindowSurface`, `SDL_PollEvent`); do not add new direct
   QuickDraw GWorld/CopyBits call sites in game code once a screen has been
   migrated. The QuickDraw-specific guidance in "Rendering And Performance"
-  below still applies to the SDL2 backend fork itself and to the QuickTime
-  Movie Toolbox GWorld interop in `Cinematics.c`.
+  below still applies to the SDL2 backend fork itself.
+- Movies: the original played its `.SMK` files with RAD's Smacker SDK
+  straight into the 16-bit frame buffer. The port decodes the same files
+  from `Intro.slf` with `retro68/Smacker/smacker.c` (verified bit-identical
+  to FFmpeg with `tools/smktest.c`) at their native 15 fps and writes each
+  frame into the window surface through a palette lookup built with
+  `SDL_MapRGB`, which is the one sanctioned exception to the RGB555
+  intermediate-surface rule below. Do not reintroduce QuickTime or a host
+  conversion step.
 - Color depth is fixed at 16-bit `SDL_PIXELFORMAT_RGB555` for every game
   surface (menu, credits, cursor compositing, decoded intro frames),
   regardless of the actual display depth SDL2 detects from the active
@@ -198,8 +205,7 @@ How the PPC target maps onto them (decided 2026-10-28):
   `MAC_DEBUG` stderr tracing (`retro68/cmake/SDL2Classic.cmake`).
 
 The following QuickDraw-level guidance applies to the SDL2 backend fork's
-internals and to the Movie Toolbox GWorld interop in `Cinematics.c`, not to
-new game-code rendering call sites — see "Rendering Backend (SDL2)" above
+internals, not to new game-code rendering call sites — see "Rendering Backend (SDL2)" above
 for the game-code interface and the fixed 16-bit color-depth policy.
 
 Prefer the smallest redraw and decode work that preserves original behavior.

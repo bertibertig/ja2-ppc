@@ -106,10 +106,9 @@ The first direct game-shell rewrite is now implemented on branch
 - `ja2_game_init_options.c` renders the difficulty screen into the SDL2
   RGB555 surface and uses SDL mouse coordinates instead of QuickDraw points.
 - `Intro.c` keeps the original intro sequencing and skip lifecycle, while
-  `Cinematics.c` decodes QuickTime into a private 16-bit GWorld and presents
-  each frame through the SDL2 surface bridge (`JA2PresentVideoWorld`). This
-  is the intentionally narrow Movie Toolbox exception described in the
-  Rendering Backend rules.
+  `Cinematics.c` decodes the original Smacker files with `Smacker/smacker.c`
+  and writes each frame into the SDL window surface (superseded the earlier
+  QuickTime/MPEG-1 path on 2026-10-28; see `JA2_PPC_VIDEO_BACKEND_PLAN.md`).
 - The clean Retro68 `JA2PPC_APPL` target and the German data bundle build
   successfully after the rewrite.
 
@@ -227,7 +226,7 @@ in-frame cursor is ever drawn.
 | `JA2InstallNormalCursor`/`SetCursor` (`ja2_mac.c:1106-1198`) | Frame-composited cursor drawn into the back-buffer surface |
 | `DebugLog` file logger | Unchanged; keep the existing file logger per `AGENTS.md` diagnostics rule (optionally also feed `SDL_LogXXX`) |
 | `ja2_music.c` (`SndNewChannel`/`SndDoCommand`) | Out of scope for this migration — it does not use QuickDraw. Leave on direct Sound Manager calls; migrating to `SDL_OpenAudioDevice` (the fork's `SDL_macaudio.c` also wraps `SndPlayDoubleBuffer`) is an optional future consistency pass, not required to fix the QuickDraw tedium problem. |
-| `ja2/Build/Intro.c` + `ja2/Build/Utils/Cinematics.c` (QuickTime Movie Toolbox into a private GWorld) | Movie decode/lifecycle ownership stays as-is (QuickTime, not QuickDraw-window code); only the final per-frame present step changes to copy the movie GWorld's pixels into the SDL back-buffer surface before `SDL_UpdateWindowSurface`, so there is one presentation path for the whole app. |
+| `ja2/Build/Intro.c` + `ja2/Build/Utils/Cinematics.c` (native Smacker decoder) | Done 2026-10-28: frames go from `Smacker/smacker.c` through a palette lookup into the SDL window surface, then `SDL_UpdateWindowSurface`. |
 
 ## Existing Path-Convention Note (pre-existing, unrelated to this migration)
 

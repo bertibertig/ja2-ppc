@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MCP_COMMAND = ["uvx", "--with", "mcp<2", "--from",
@@ -113,6 +114,24 @@ def remote_shots(mcp, machine):
     return re.findall(r"\s(\S+\.bmp)$", listing, re.MULTILINE)
 
 
+def wait_for_result(mcp, machine, staging, max_wait):
+    probe = os.path.join(staging, "probe.log")
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        time.sleep(10)
+        if os.path.exists(probe):
+            os.remove(probe)
+        mcp.call("download_file", check=False, machine=machine,
+                 remote_path="/JA2AUTOTEST.log", local_path=probe)
+        if os.path.exists(probe):
+            with open(probe, encoding="latin-1") as handle:
+                if "result=" in handle.read():
+                    # Give the app time to write its shutdown logs and exit.
+                    time.sleep(5)
+                    return
+    print(f"no result= after {max_wait} s; the app may still be running on the Mac")
+
+
 def run_autotest(args):
     build_dir = os.path.abspath(args.build)
     binary = os.path.join(build_dir, "JA2PPC.bin")
@@ -155,8 +174,13 @@ def run_autotest(args):
                  "-video_size", "1024x768", "-i", args.video_device, "-t", str(args.capture),
                  "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                  os.path.join(args.out, "capture.mp4")])
-        print(mcp.call("execute_binary", machine=machine, platform="ppc", binary_path=binary)
-              .splitlines()[0])
+        launched = mcp.call("execute_binary", check=False, machine=machine, platform="ppc",
+                            binary_path=binary)
+        print(launched.splitlines()[0])
+        if "Timed out" in launched:
+            # LaunchAPPL gives up after 45 s but the app keeps running on the
+            # Mac; the script's own result line marks the real end.
+            wait_for_result(mcp, machine, staging, args.max_wait)
         for remote in REMOTE_OUTPUTS:
             mcp.call("download_file", check=False, machine=machine, remote_path=remote,
                      local_path=os.path.join(args.out, remote.lstrip("/")))
@@ -200,6 +224,8 @@ def main():
     autotest.add_argument("--capture", type=int, default=0, metavar="SECONDS",
                           help="record the Cam Link in parallel")
     autotest.add_argument("--video-device", default="/dev/video0")
+    autotest.add_argument("--max-wait", type=int, default=900, metavar="SECONDS",
+                          help="how long to poll for result= after LaunchAPPL times out")
     args = parser.parse_args()
     if args.command == "call":
         run_call(args)

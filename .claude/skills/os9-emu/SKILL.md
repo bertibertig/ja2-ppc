@@ -69,9 +69,11 @@ The pm8500 opens a second window for its AV video card; the default
 
 ## Rules
 
-- Which emulator when: QEMU (9.2.2) for everyday smoke tests. DingusPPC
-  (8.6 on the 7600/120) is slow and only required before a release (and
-  when touching version-gated 8.6 code paths), not for every change.
+- Real hardware first: always test on the PowerBook (or another real Mac
+  meeting the minimum spec) via `mac-hw-test`. Use QEMU (9.2.2) only when
+  no real Mac is reachable, and say so in the report. DingusPPC (8.6 on
+  the 7600/120) is slow and only required before a release (and when
+  touching version-gated 8.6 code paths).
 
 - An emulator pass is a smoke test only. Acceptance and every performance
   number come from the PowerBook G3 (`mac-hw-test`, `ja2-profile`).

@@ -8,6 +8,8 @@
 #define JA2_SLF_HEADER_SIZE 532
 #define JA2_SLF_ENTRY_SIZE 280
 
+#define JA2_SLF_STDIO_BUFFER (64 * 1024)
+
 struct JA2SLFArchive {
     FILE *file;
     unsigned long entryCount;
@@ -109,6 +111,13 @@ JA2SLFArchive *JA2SLFOpen(const char *archiveName)
             sprintf(path, "Data/%s", titleName);
             archive->file = fopen(path, "rb");
         }
+    }
+    /* Retro68's stdio refills through a 1 KB buffer, one File Manager call
+       per KB; entries (images, movie frames, music) are read in large
+       pieces, so give archives a 64 KB buffer (falls back to the default
+       when the allocation fails). */
+    if (archive->file != NULL) {
+        setvbuf(archive->file, NULL, _IOFBF, JA2_SLF_STDIO_BUFFER);
     }
     if (archive->file == NULL ||
         fread(header, 1, sizeof(header), archive->file) != sizeof(header) ||

@@ -55,8 +55,13 @@ cmake --build retro68/build-german-debug
 `tools/build-german-debug.sh all` does the same (it reads `local.env`;
 `RETRO68_TOOLCHAIN_FILE` overrides the toolchain file).
 
-Avoid `--clean-first` unless needed: it re-runs the intro video conversion
-(FFmpeg) and re-copies the full `Data/` tree.
+Avoid `--clean-first` unless needed: it re-copies the full `Data/` tree.
+
+Smacker decoder check on the host (after touching `retro68/Smacker/`):
+`cc -O2 -I retro68/Smacker -o /tmp/smktest tools/smktest.c
+retro68/Smacker/smacker.c`, run it on an SMK extracted from `Intro.slf` and
+`cmp` its output with `ffmpeg -i X.SMK -f rawvideo -pix_fmt rgb24` /
+`-f s16le` (must be identical; see the header of `tools/smktest.c`).
 
 ## Outputs
 

@@ -1,0 +1,20 @@
+# New game -> difficulty OK -> the four intro videos -> laptop.
+# Run with skip_intros=0. Video stats ("Video: stats ...") land in
+# JA2PPC-Debug.log; profile builds also record the movie/present zones.
+timeout 480
+wait 6000
+expect main
+click 320 290
+wait 2000
+expect difficulty
+key Return
+wait 2000
+expect intro
+mark intro
+wait 6000
+shot intro_rebel
+waitfor laptop 420000
+mark laptop
+wait 4000
+shot laptop
+quit

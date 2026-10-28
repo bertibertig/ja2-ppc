@@ -22,6 +22,7 @@
  *   expect <screen>      fail unless the shell shows that screen
  *                        (main, new_game, difficulty, intro, load_game,
  *                        options, credits, laptop)
+ *   waitfor <screen> <ms> pause until that screen shows; fail after ms
  *   mark <label>         profiler marker (profile builds) + log line
  *   log <text>           log line
  *   timeout <s>          watchdog, quits with result=timeout (default 600)
@@ -43,6 +44,8 @@ static short gNextLine;
 static Uint32 gStartTicks;
 static Uint32 gWaitUntilTicks;
 static unsigned long gWaitFrames;
+static short gWaitForScreen = -1;
+static Uint32 gWaitForDeadline;
 static unsigned long gFrame;
 static Uint32 gTimeoutMs = 600000;
 static short gFailures;
@@ -215,6 +218,18 @@ static void TakeShot(const char *name)
     AutotestLog("shot %s", path);
 }
 
+static short ScreenIndex(const char *screen)
+{
+    short index;
+
+    for (index = 0; index < (short)(sizeof(gScreenNames) / sizeof(gScreenNames[0])); ++index) {
+        if (strcmp(gScreenNames[index], screen) == 0) {
+            return index;
+        }
+    }
+    return -1;
+}
+
 static void Expect(const char *screen)
 {
     const char *actual = "unknown";
@@ -289,6 +304,19 @@ static Boolean RunCommand(char *line)
         AutotestLog("key %s", argument);
         return 1;
     }
+    if (strcmp(command, "waitfor") == 0) {
+        char screen[16];
+        unsigned long limit = 0;
+
+        if (sscanf(argument, "%15s %lu", screen, &limit) != 2 || ScreenIndex(screen) < 0) {
+            ++gFailures;
+            AutotestLog("FAIL bad waitfor '%s'", argument);
+            return 0;
+        }
+        gWaitForScreen = ScreenIndex(screen);
+        gWaitForDeadline = SDL_GetTicks() + (Uint32)limit;
+        return 1;
+    }
     if (strcmp(command, "shot") == 0) {
         TakeShot(argument);
         return 0;
@@ -332,6 +360,18 @@ void JA2AutotestFrame(void)
     if (gWaitFrames > 0) {
         --gWaitFrames;
         return;
+    }
+    if (gWaitForScreen >= 0) {
+        if (gMenuScreen == gWaitForScreen) {
+            AutotestLog("ok waitfor %s", gScreenNames[gWaitForScreen]);
+            gWaitForScreen = -1;
+        } else if ((Sint32)(SDL_GetTicks() - gWaitForDeadline) >= 0) {
+            ++gFailures;
+            AutotestLog("FAIL waitfor %s timed out", gScreenNames[gWaitForScreen]);
+            gWaitForScreen = -1;
+        } else {
+            return;
+        }
     }
     if (gWaitUntilTicks != 0) {
         if ((Sint32)(SDL_GetTicks() - gWaitUntilTicks) < 0) {

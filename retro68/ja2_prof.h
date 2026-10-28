@@ -20,6 +20,7 @@ enum {
     JA2_PROF_DECODE,
     JA2_PROF_FILE,
     JA2_PROF_IDLE,
+    JA2_PROF_MOVIE,
     JA2_PROF_ZONE_COUNT
 };
 

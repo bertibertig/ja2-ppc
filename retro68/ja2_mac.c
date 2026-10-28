@@ -45,7 +45,6 @@ static Boolean gMenuButtonsLoaded = 0;
 SDL_Surface *gMenuSurface;
 static SDL_Surface *gCreditsSurface;
 static SDL_Surface *gCreditsBackgroundSurface;
-static SDL_Surface *gVideoSurface;
 static SDL_Surface *gFPSOverlaySurface;
 static unsigned char *gMenuButtonData;
 static Uint16 gMenuButtonPalette[256];
@@ -1276,52 +1275,19 @@ void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
     RecordPresentedFrame();
 }
 
-Boolean JA2PresentVideoWorld(GWorldPtr world)
+void JA2PresentWindowSurface(const char *name)
 {
-    PixMapHandle pixMap;
-    unsigned char *source;
-    unsigned char *destination;
-    long sourceRowBytes;
-    int row;
-
-    if (world == NULL || gWindow == NULL) {
-        return 0;
+    if (gWindow == NULL) {
+        return;
     }
-    if (gVideoSurface == NULL) {
-        gVideoSurface = SDL_CreateRGBSurfaceWithFormat(0, JA2_SCREEN_WIDTH,
-            JA2_SCREEN_HEIGHT, 16, SDL_PIXELFORMAT_RGB555);
-        if (gVideoSurface == NULL) {
-            DebugLog("Video: SDL frame surface creation failed: %s", SDL_GetError());
-            return 0;
-        }
+    JA2_PROF_BEGIN(JA2_PROF_PRESENT);
+    if (SDL_UpdateWindowSurface(gWindow) != 0) {
+        JA2_PROF_END(JA2_PROF_PRESENT);
+        DebugLog("Renderer: %s SDL_UpdateWindowSurface failed: %s", name, SDL_GetError());
+        return;
     }
-    pixMap = GetGWorldPixMap(world);
-    if (pixMap == NULL || !LockPixels(pixMap)) {
-        DebugLog("Video: cannot lock QuickTime frame GWorld");
-        return 0;
-    }
-    if (SDL_MUSTLOCK(gVideoSurface)) {
-        SDL_LockSurface(gVideoSurface);
-    }
-    source = (unsigned char *)GetPixBaseAddr(pixMap);
-    destination = (unsigned char *)gVideoSurface->pixels;
-    sourceRowBytes = (**pixMap).rowBytes & 0x3fff;
-    if (sourceRowBytes == JA2_SCREEN_WIDTH * 2 &&
-        gVideoSurface->pitch == JA2_SCREEN_WIDTH * 2) {
-        memcpy(destination, source, JA2_SCREEN_WIDTH * JA2_SCREEN_HEIGHT * 2);
-    } else {
-        for (row = 0; row < JA2_SCREEN_HEIGHT; ++row) {
-            memcpy(destination + (long)row * gVideoSurface->pitch,
-                   source + (long)row * sourceRowBytes,
-                   JA2_SCREEN_WIDTH * 2);
-        }
-    }
-    if (SDL_MUSTLOCK(gVideoSurface)) {
-        SDL_UnlockSurface(gVideoSurface);
-    }
-    UnlockPixels(pixMap);
-    JA2BlitSurfaceToWindow(gVideoSurface, "intro video frame");
-    return 1;
+    JA2_PROF_END(JA2_PROF_PRESENT);
+    RecordPresentedFrame();
 }
 
 void JA2BlitMenuBackground(void)
@@ -2182,10 +2148,6 @@ int main(int argc, char *argv[])
     if (gCursorSurface != NULL) {
         SDL_FreeSurface(gCursorSurface);
         gCursorSurface = NULL;
-    }
-    if (gVideoSurface != NULL) {
-        SDL_FreeSurface(gVideoSurface);
-        gVideoSurface = NULL;
     }
     if (gFPSOverlaySurface != NULL) {
         SDL_FreeSurface(gFPSOverlaySurface);

@@ -1,116 +1,50 @@
-# PPC Video Backend Plan
+# JA2 PPC Video Backend
 
-## Original Flow
+Status (2026-10-28): implemented as a native Smacker player. This replaces
+the earlier plan of converting the movies to MPEG-1 on the host and playing
+them with QuickTime, which ran at 5-7 fps on the PowerBook G3 (MPEG-1 has no
+15 fps mode, so the conversion also raised the frame rate to 25 fps) and
+changed image quality.
 
-The original flow is split between:
+## How it works
 
-- `ja2/Build/GameInitOptionsScreen.c`
-  - Commits `gGameOptions`.
-  - Sets the intro type to `INTRO_BEGINING`.
-  - Leaves the options screen for `INTRO_SCREEN`.
-- `ja2/Build/Intro.c`
-  - Disables the cursor and music for the intro.
-  - Initializes Smacker playback at 640x480.
-  - Plays the beginning sequence in this order:
-    1. `INTRO\Rebel_cr.smk`
-    2. `INTRO\Omerta.smk`
-    3. `INTRO\Prague_cr.smk`
-    4. `INTRO\Prague.smk`
-  - Polls playback once per frame.
-  - Advances when a file ends, or skips the current file on mouse/button input.
-  - Returns to `INIT_SCREEN` after the final video.
-- `ja2/Build/Utils/Cinematics.c`
-  - Owns Smacker file handles, playback slots, frame timing, decoding, and
-    video-surface output.
+- The x86 game used RAD's Smacker SDK (`smack.h`, not part of the source
+  release) from `Utils/Cinematics.c`: `SmackOpen` on the file inside
+  `Intro.slf`, `SmackToBuffer` into the 16-bit frame buffer, `SmackDoFrame`,
+  `SmackNextFrame`, `SmackWait`, with audio played through MSS.
+- `retro68/Smacker/smacker.c` decodes SMK2/SMK4 video (palette updates,
+  mono/full/skip/fill blocks, the three-entry Huffman cache) and the packed
+  DPCM audio tracks. It is endian-neutral and has no Mac dependencies.
+- `tools/smktest.c` builds the decoder on the host and writes RGB24 frames
+  and PCM; for all four intro movies the output is byte-identical to
+  FFmpeg's Smacker decoder (video and audio).
+- `retro68/ja2/Build/Utils/Cinematics.c` reads the movie from `Intro.slf`
+  with a 128 KB sequential read-ahead (SLF files use a 64 KB stdio buffer),
+  decodes frames on a `Microseconds()` clock at the movie's own rate,
+  decodes but does not show frames when it falls behind, writes the shown
+  frame into the window surface through a 256-entry `SDL_MapRGB` lookup and
+  streams each frame's audio to a Sound Manager channel (`bufferCmd` plus
+  `callBackCmd` per frame, 48 buffers).
+- `JA2PPC-Debug.log` gets one `Video: stats` line per movie (frames shown,
+  late frames, effective fps x10, dropped audio buffers); profile builds
+  record the `movie` (decode incl. file reads), `blit` (palette conversion)
+  and `present` zones.
 
-The PPC port must preserve these ownership and lifecycle boundaries.
+## Measured on the PowerBook G3 333 MHz (Mac OS 9.2.2)
 
-## Backend Decision
+| Movie | QuickTime MPEG-1 | Smacker native |
+|---|---|---|
+| REBEL_CR (187 frames) | 7.3 fps | 14.4 fps |
+| OMERTA (671) | ~5 fps | 14.5 fps |
+| PRAGUE_CR (185) | - | 14.9 fps |
+| PRAGUE (1928) | 5.5 fps | 14.8 fps |
 
-The JA2 assets are `SMK2` Smacker files stored in `Intro.slf`. QuickTime Movie
-Toolbox APIs documented in the local OS 9 headers, including
-`NewMovieFromDataFork`, `SetMovieGWorld`, and `MoviesTask`, do not provide a
-Smacker decoder. They remain a possible backend for future QuickTime media,
-but must not be used as a false implementation for these intro assets.
+Source rate is 15 fps; no audio buffers were dropped. Per shown frame:
+decode ~9 ms (median), palette conversion ~11 ms, present ~19 ms.
 
-FFmpeg on the host can decode Smacker (`smk`, `smackvideo`, and `smackaudio`).
-The suggested H.264/AAC MOV conversion is not a safe System 9 target because
-classic QuickTime releases do not generally include H.264 playback. The
-installed FFmpeg has no Cinepak encoder, so the current conversion target is a
-VCD-style MPEG program stream using MPEG-1 video and MP2 audio. The generated
-files are 320x240 and are intended to use QuickTime's MPEG-1 component. They
-must be generated during the host build and bundled as deployment outputs; they
-must not be committed as generated source assets.
+## Open points
 
-The conversion route still requires an SLF extraction step because the source
-SMK files are inside `Intro.slf`. It must log source offsets, lengths, FFmpeg
-status, output codec, dimensions, and output size. The PPC Movie Toolbox path
-must check QuickTime availability with `Gestalt`, create the movie from its
-data fork, attach it to the frame GWorld with `SetMovieGWorld`, advance it with
-`MoviesTask`, and dispose the movie and data handles on every failure path.
-
-The current PPC deployment path uses a host conversion backend with this
-platform interface:
-
-```text
-Initialize(window, frameWorld)
-Open(archiveName, entryName)
-Poll()
-Skip()
-Close()
-Shutdown()
-```
-
-The host conversion step extracts the four entries, invokes FFmpeg, and caches
-320x240 MPEG program streams encoded as MPEG-1 video at 1,150 kbit/s with MP2
-audio at 128 kbit/s and 44.1 kHz. The PPC Movie Toolbox backend will validate
-QuickTime availability, create the movie from its data fork, attach it to an
-off-screen 16-bit QuickDraw GWorld with `SetMovieGWorld`, advance it cooperatively with
-`MoviesTask`, and present each complete frame without clipped window
-`CopyBits` updates. The native SMK2 decoder remains the fallback if the
-selected legacy QuickTime component is not available on the target System 9
-installation.
-
-## Implementation Stages
-
-1. Probe and validate `Intro.slf` SMK2 entries without claiming playback.
-2. Test the generated legacy-compatible MPEG files with the target System 9
-   QuickTime installation and validate video-only playback.
-3. Add a QuickTime Movie Toolbox backend in the PPC counterpart at
-   `retro68/Utils/Cinematics.c`. The PPC tree is rooted at `retro68/`; do not
-   reproduce the original `ja2/Build/` prefix beneath it.
-4. If the target QuickTime component cannot play the generated files, implement
-   the SMK2 Huffman trees and frame chunk decoder in
-   `retro68/Utils/Cinematics.c`.
-5. Convert decoded indexed/YUV-style Smacker frame data into the native 16-bit
-   QuickDraw GWorld
-   format used by the PPC renderer, or copy frames produced by QuickTime into
-   that GWorld.
-6. Add cooperative timing using `TickCount()` and the frame rate from the SMK2
-   header or Movie Toolbox time scale. Do not use a busy loop or Time Manager
-   callback for decoding.
-7. Add intro-screen state sequencing matching `Intro.c`, including skip input,
-   cursor ownership, music shutdown, cleanup, and return to initialization.
-8. Add optional Sound Manager audio-track playback only after video-only
-   playback is stable.
-
-## OS 9 Rules
-
-- Consult `resources/os9docs-master/` and `MAC_OS9_GAME_DEVELOPMENT.md` before
-  using Movies, QuickDraw, Memory Manager, Sound Manager, or timing APIs.
-- Use a GWorld for decoded frames and lock pixels only while decoding or
-  presenting a frame.
-- Keep cached/static frame data immutable after preparation.
-- Keep `WaitNextEvent` cooperative and clamp elapsed time after pauses.
-- Balance cursor visibility calls exactly; do not paint a cursor into the live
-  window PixMap.
-- Log asset lookup, SMK2 header fields, allocations, frame decode failures,
-  timing decisions, GWorld state, and shutdown paths.
-
-## Current Boundary Status
-
-The reusable PPC cinematics boundary begins at `retro68/Utils/Cinematics.c`,
-the PPC source counterpart of the original `ja2/Build/Utils/Cinematics.c`.
-Until the decoder stages are complete, intro
-playback must report an explicit unsupported-decoder diagnostic and must not
-silently substitute a static frame or claim that the intro videos played.
+- The 604/120 minimum target needs about 3x less work per frame: candidates
+  are converting only changed 4x4 blocks and presenting dirty rectangles.
+- The endgame movies and any other SMK users go through the same decoder
+  once the original `Cinematics.c`/`Intro.c` run on the Mac SGP.

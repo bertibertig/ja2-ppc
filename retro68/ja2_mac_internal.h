@@ -67,7 +67,9 @@ void DrawLineRGB555(SDL_Surface *surface, short x0, short y0, short x1,
 void RestoreMainMenu(void);
 void JA2BlitMenuBackground(void);
 void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name);
-Boolean JA2PresentVideoWorld(GWorldPtr world);
+/* Presents the window surface as drawn by the caller (movie playback writes
+   it directly), without the cursor or FPS overlays. */
+void JA2PresentWindowSurface(const char *name);
 void JA2PPCIntroPoll(void);
 void JA2PPCIntroSkip(void);
 void JA2PPCIntroShutdown(void);

@@ -72,7 +72,7 @@ Boolean JA2PPCIntroStart(void)
         CompleteIntroToNewGame("options.cfg");
         return 1;
     }
-    if (!JA2PPCVideoInitialize(gWindow, NULL)) {
+    if (!JA2PPCVideoInitialize()) {
         DebugLog("Intro: video backend unavailable; sequence not started");
         return 0;
     }
