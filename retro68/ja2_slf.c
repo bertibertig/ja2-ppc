@@ -1,4 +1,5 @@
 #include "ja2_slf.h"
+#include "ja2_prof.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -184,9 +185,14 @@ int JA2SLFFind(JA2SLFArchive *archive, const char *fileName,
 int JA2SLFRead(JA2SLFArchive *archive, unsigned long fileOffset,
                void *buffer, unsigned long length)
 {
-    if (archive == NULL || archive->file == NULL || buffer == NULL ||
-        fseek(archive->file, (long)fileOffset, SEEK_SET) != 0) {
+    int result;
+
+    if (archive == NULL || archive->file == NULL || buffer == NULL) {
         return 0;
     }
-    return fread(buffer, 1, length, archive->file) == length;
+    JA2_PROF_BEGIN(JA2_PROF_FILE);
+    result = fseek(archive->file, (long)fileOffset, SEEK_SET) == 0 &&
+             fread(buffer, 1, length, archive->file) == length;
+    JA2_PROF_END(JA2_PROF_FILE);
+    return result;
 }

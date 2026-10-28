@@ -3,11 +3,15 @@
 #include "ja2_mac_internal.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static Boolean gOptionsLoaded;
 static Boolean gSkipIntros;
 static Boolean gShowFPS = 1;
+static unsigned long gProfileFrames;
+static Boolean gProfileUncapped;
+static char gProfileLabel[32] = "default";
 
 static char *Trim(char *text)
 {
@@ -107,6 +111,16 @@ void JA2OptionsLoad(void)
         } else if (EqualIgnoreCase(key, "show_fps")) {
             gShowFPS = ParseBoolean(value);
             DebugLog("Options: show_fps=%d", gShowFPS);
+        } else if (EqualIgnoreCase(key, "profile_frames")) {
+            gProfileFrames = strtoul(value, NULL, 10);
+            DebugLog("Options: profile_frames=%lu", gProfileFrames);
+        } else if (EqualIgnoreCase(key, "profile_uncapped")) {
+            gProfileUncapped = ParseBoolean(value);
+            DebugLog("Options: profile_uncapped=%d", gProfileUncapped);
+        } else if (EqualIgnoreCase(key, "profile_label")) {
+            strncpy(gProfileLabel, value, sizeof(gProfileLabel) - 1);
+            gProfileLabel[sizeof(gProfileLabel) - 1] = 0;
+            DebugLog("Options: profile_label=%s", gProfileLabel);
         }
     }
     fclose(file);
@@ -123,4 +137,22 @@ Boolean JA2OptionsShowFPS(void)
 {
     JA2OptionsLoad();
     return gShowFPS;
+}
+
+unsigned long JA2OptionsProfileFrames(void)
+{
+    JA2OptionsLoad();
+    return gProfileFrames;
+}
+
+Boolean JA2OptionsProfileUncapped(void)
+{
+    JA2OptionsLoad();
+    return gProfileUncapped;
+}
+
+const char *JA2OptionsProfileLabel(void)
+{
+    JA2OptionsLoad();
+    return gProfileLabel;
 }

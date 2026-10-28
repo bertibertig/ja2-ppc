@@ -2,6 +2,7 @@
 
 #include "../ja2_mac_internal.h"
 #include "../ja2_music.h"
+#include "../ja2_prof.h"
 #include "../ja2_ppc_text.h"
 #include "../ja2_slf.h"
 
@@ -986,6 +987,7 @@ Boolean JA2LaptopRender(void)
         return 0;
     }
     if (!gLaptopEntered) {
+        JA2_PROF_MARK("laptop");
         gLaptopEntered = 1;
         gLaptopWelcomeVisible = 1;
         gLaptopHideHelp = 0;

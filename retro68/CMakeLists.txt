@@ -4,6 +4,7 @@ project(JA2PPCMac C)
 set(JA2_DATA_DIR "" CACHE PATH "JA2 installation directory containing Data/")
 set(JA2_LANGUAGE "german" CACHE STRING "JA2 data language (english or german)")
 option(JA2_DEBUG_BUILD "Write a detailed runtime debug log" ON)
+option(JA2_PROFILE "Build the frame profiler and write JA2PROF.csv" OFF)
 option(JA2_CONVERT_INTRO_VIDEOS "Convert Smacker intros to QuickTime MOV during the host build" ON)
 set_property(CACHE JA2_LANGUAGE PROPERTY STRINGS english german)
 
@@ -33,6 +34,8 @@ add_application(JA2PPC
     ja2_game_init_options.h
     ja2_options.c
     ja2_options.h
+    ja2_prof.c
+    ja2_prof.h
     Laptop/laptop.c
     Laptop/laptop.h
     ja2_new_game_init.c
@@ -62,6 +65,9 @@ else()
 endif()
 if(JA2_DEBUG_BUILD)
     target_compile_definitions(JA2PPC PRIVATE JA2_DEBUG_BUILD=1)
+endif()
+if(JA2_PROFILE)
+    target_compile_definitions(JA2PPC PRIVATE JA2_PROFILE=1)
 endif()
 
 # Stage 2 of the SDL2 rendering backend migration: a standalone smoke-test

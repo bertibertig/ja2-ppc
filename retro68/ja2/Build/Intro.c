@@ -4,6 +4,7 @@
 #include "../../ja2_mac_internal.h"
 #include "../../ja2_music.h"
 #include "../../ja2_options.h"
+#include "../../ja2_prof.h"
 
 static const char *gIntroVideoNames[] = {
     "REBEL_CR.SMK", "OMERTA.SMK", "PRAGUE_CR.SMK", "PRAGUE.SMK"
@@ -64,6 +65,7 @@ Boolean JA2PPCIntroStart(void)
     }
     DebugLog("Intro: beginning sequence with %d videos menuScreen=%d difficulty=%d",
              gIntroVideoCount, gMenuScreen, gNewGameDifficulty);
+    JA2_PROF_MARK("intro");
     JA2MenuMusicStop();
     if (JA2OptionsSkipIntros()) {
         DebugLog("Intro: skipped by options.cfg; no video backend started");

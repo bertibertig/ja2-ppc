@@ -28,6 +28,7 @@
 #include "ja2_mac_internal.h"
 #include "ja2_game_init_options.h"
 #include "ja2_options.h"
+#include "ja2_prof.h"
 #include "ja2_ppc_text.h"
 
 #if defined(JA2_LANGUAGE_GERMAN)
@@ -1252,16 +1253,22 @@ void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
     /* The source is already a fixed RGB555 composition surface. Let SDL do
        the single final format conversion instead of copying the whole frame
        through a second RGB555 surface first. */
+    JA2_PROF_BEGIN(JA2_PROF_BLIT);
     if (SDL_BlitSurface(surface, NULL, windowSurface, NULL) != 0) {
+        JA2_PROF_END(JA2_PROF_BLIT);
         DebugLog("Renderer: %s SDL_BlitSurface failed: %s", name, SDL_GetError());
         return;
     }
     DrawFPSCounter(windowSurface);
     DrawCursorOverlay(windowSurface);
+    JA2_PROF_END(JA2_PROF_BLIT);
+    JA2_PROF_BEGIN(JA2_PROF_PRESENT);
     if (SDL_UpdateWindowSurface(gWindow) != 0) {
+        JA2_PROF_END(JA2_PROF_PRESENT);
         DebugLog("Renderer: %s SDL_UpdateWindowSurface failed: %s", name, SDL_GetError());
         return;
     }
+    JA2_PROF_END(JA2_PROF_PRESENT);
     SDL_GetMouseState(&gLastMouseX, &gLastMouseY);
     gMouseMotionNeedsPresent = 0;
     gScreenNeedsPresent = 0;
@@ -1321,8 +1328,24 @@ void JA2BlitMenuBackground(void)
     JA2BlitSurfaceToWindow(gMenuSurface, "menu background");
 }
 
+static Boolean DecodeIndexedBackground(SDL_Surface *destination,
+                                       const char *archiveName,
+                                       const char *entryName);
+
 Boolean RenderIndexedBackground(SDL_Surface *destination, const char *archiveName,
                                 const char *entryName)
+{
+    Boolean result;
+
+    JA2_PROF_BEGIN(JA2_PROF_DECODE);
+    result = DecodeIndexedBackground(destination, archiveName, entryName);
+    JA2_PROF_END(JA2_PROF_DECODE);
+    return result;
+}
+
+static Boolean DecodeIndexedBackground(SDL_Surface *destination,
+                                       const char *archiveName,
+                                       const char *entryName)
 {
     JA2SLFArchive *archive;
     unsigned char *fileData;
@@ -1632,6 +1655,8 @@ static void DrawCreditsScreen(void)
 static void EnterCreditsScreen(void)
 {
     unsigned short face;
+
+    JA2_PROF_MARK("credits");
     gMenuScreen = MENU_SCREEN_CREDITS;
     gCreditsLastScrollTicks = SDL_GetTicks();
     gCreditsScrollOffset = 0;
@@ -1823,6 +1848,7 @@ static void RenderMainMenuDirectly(void)
 
 static void EnterMainMenu(void)
 {
+    JA2_PROF_MARK("main_menu");
     gStartupActive = 0;
     DebugLog("Main menu: rebuilding archive-backed composition");
     RenderMainMenuDirectly();
@@ -2051,6 +2077,7 @@ int main(int argc, char *argv[])
     }
     DebugLog("JA2 PPC startup (SDL2 rendering backend)");
     JA2OptionsLoad();
+    JA2ProfInit();
     JA2MenuMusicSetLogger(DebugLog);
     DebugLog("Language: %s",
 #if defined(JA2_LANGUAGE_GERMAN)
@@ -2093,21 +2120,44 @@ int main(int argc, char *argv[])
     while (gRunning) {
         SDL_Event event;
 
+        JA2ProfFrameBegin();
+        JA2_PROF_BEGIN(JA2_PROF_EVENTS);
         while (SDL_PollEvent(&event)) {
             HandleJA2Event(&event);
         }
+        JA2_PROF_END(JA2_PROF_EVENTS);
+        JA2_PROF_BEGIN(JA2_PROF_LOGIC);
         PollStartup();
+        JA2_PROF_END(JA2_PROF_LOGIC);
+        JA2_PROF_BEGIN(JA2_PROF_AUDIO);
         JA2MenuMusicPoll();
+        JA2_PROF_END(JA2_PROF_AUDIO);
+        JA2_PROF_BEGIN(JA2_PROF_LOGIC);
         UpdateMainMenuHover();
         PollCredits();
+        JA2_PROF_END(JA2_PROF_LOGIC);
+        JA2_PROF_BEGIN(JA2_PROF_VIDEO);
         JA2PPCIntroPoll();
+        JA2_PROF_END(JA2_PROF_VIDEO);
+        JA2_PROF_BEGIN(JA2_PROF_RENDER);
         if (gActionScreenNeedsRender) {
             gActionScreenNeedsRender = 0;
             DrawMenuActionScreen();
         }
         UpdateCursorPresentIfMoved();
-        SDL_Delay(16);
+        JA2_PROF_END(JA2_PROF_RENDER);
+        if (!JA2ProfUncapped()) {
+            JA2_PROF_BEGIN(JA2_PROF_IDLE);
+            SDL_Delay(16);
+            JA2_PROF_END(JA2_PROF_IDLE);
+        }
+        JA2ProfFrameEnd();
+        if (JA2ProfShouldQuit()) {
+            DebugLog("Profiler: frame limit reached; quitting");
+            gRunning = 0;
+        }
     }
+    JA2ProfShutdown();
 
     if (gMenuSurface != NULL) {
         SDL_FreeSurface(gMenuSurface);
