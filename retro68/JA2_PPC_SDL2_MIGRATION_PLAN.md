@@ -53,7 +53,7 @@ Recommendation: for the initial JA2 integration, build SDL2 with
   InputSprocket; that dependency is only compiled in when the define is set.
 
 This keeps the dependency surface, code size, and RAM footprint down, which
-matters for the 32 MB RAM / 603e-604 @ 100-120 MHz target.
+matters for the 64 MB RAM / 604 @ 120 MHz target (AGENTS.md).
 
 ### OS 8.6 caveat
 
@@ -256,7 +256,7 @@ is a separate, explicit cleanup task and is out of scope here.
 - Static-linking all of SDL2's core, even with AGL/DrawSprocket/InputSprocket
   disabled, still adds audio/render/joystick/event code the game doesn't use.
   Keep `-ffunction-sections`/`-Wl,-gc-sections` (already used for `JA2PPC`)
-  and verify the final bundle stays within the 32 MB RAM / disk budget after
+  and verify the final bundle stays within the 32 MB partition / disk budget after
   each stage.
 - `ExternalProject_Add`-wrapped Makefile builds do not automatically track
   header-level incremental changes as precisely as a native CMake target;

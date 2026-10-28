@@ -1,6 +1,6 @@
 ---
 name: os9-emu
-description: Run a JA2 PPC build headlessly in a Mac OS 9 emulator (QEMU mac99 or DingusPPC) via tools/os9-emu.sh - deploy into Startup Items of a private OS image copy, boot, collect JA2PPC-Debug.log and QEMU screenshots. Use for quick functional smoke tests when the PowerBook is off; never for performance numbers or final acceptance.
+description: Run a JA2 PPC build headlessly in a Mac OS 8.6/9 emulator (QEMU mac99 with 9.2.2, DingusPPC Power Mac 7600 with 8.6) via tools/os9-emu.sh - deploy into Startup Items of a private OS image copy, boot, collect JA2PPC-Debug.log and QEMU screenshots. Use for quick functional smoke tests when the PowerBook is off; never for performance numbers or final acceptance.
 ---
 
 # Mac OS 9 emulator smoke tests
@@ -17,16 +17,17 @@ description: Run a JA2 PPC build headlessly in a Mac OS 9 emulator (QEMU mac99 o
 4. `collect` copies `JA2PPC-Debug.log` and `JA2PROF.csv` to `.emu-out/`.
    No log means the game never started (or the OS never finished booting).
 
-Variables: `EMU_ENGINE=qemu|dingus`, `JA2_BUILD_DIR`, `EMU_OPTIONS=<cfg>`
+Variables: `EMU_ENGINE=qemu|dingus` (default qemu), `JA2_BUILD_DIR`, `EMU_OPTIONS=<cfg>`
 (e.g. with `skip_intros=1`), `EMU_TIMEOUT`, `EMU_BASE_IMAGE`,
-`EMU_SCREENSHOTS` (QEMU only: N evenly spaced PNGs in `.emu-out/`; read them
-to see the guest screen), `EMU_INSTALL_CD`, `QEMU_DISPLAY`.
+`EMU_SCREENSHOTS` (N evenly spaced guest-only PNGs in `.emu-out/`: QEMU via
+its monitor, DingusPPC by capturing its own XWayland window; read them to see
+the guest screen), `EMU_INSTALL_CD`, `QEMU_DISPLAY`.
 
-Interactive (QEMU only, the user drives the window): `install` boots the
-install CD with the base image attached; `gui` boots the base image for
-one-off guest settings, then run `reset` so the working copy picks them up.
-Both use the SDL UI when `qemu-ui-sdl` is installed (GTK loses the pointer
-under KDE Wayland). Never take host screenshots of these windows (the user's
+Interactive (the user drives the window): `install` (QEMU only) boots the
+install CD with the base image attached; `gui` boots the base image of either
+engine for one-off guest settings, then run `reset` so the working copy picks
+them up. QEMU uses the SDL UI when `qemu-ui-sdl` is installed (GTK loses the
+pointer under KDE Wayland); DingusPPC grabs the mouse with Ctrl+G. Never take host screenshots of these windows (the user's
 desktop is private); use `screendump` on `$EMU_WORK_DIR/qemu-install.sock`.
 
 QEMU hardware mirrors the PowerBook G3 Lombard (`QEMU_MACHINE` in the
@@ -40,7 +41,7 @@ emulator offers RAVE/OpenGL 3D; JA2 does not need it.
 | Engine | OS image | Status |
 |---|---|---|
 | `qemu` (mac99, New World) | `$EMU_WORK_DIR/base/macos922.img`, German Mac OS 9.2.2 (iMac CD), HFS Standard, 4 GB | Ready (2026-10-28). Boots to the Finder in under 30 s at 1024x768 thousands; setup/AirPort assistants removed from Startup Items, unclean-shutdown warning disabled, so hard-stopped runs reboot without a dialog. |
-| `dingus` (pmg3dt, Beige G3 ROM) | `$VM_DIR/Powermac G3/macos91.img`, German 9.1 | Abandoned 2026-10-28: "Busfehler (1)" at the 9.1 welcome screen, also with all ATI extensions disabled. Interpreter only (no JIT), no 3D. Use QEMU. |
+| `dingus` (pm7600 `--cpu 604`, 64 MB, `--mon_id VGA-SVGA`, ROM `$EMU_WORK_DIR/base86/pm7600.rom`) | `$EMU_WORK_DIR/base86/macos86.img`, German Mac OS 8.5 + 8.6 update, HFS Standard, 4 GB | Ready (2026-10-28). The minimum-spec target (Power Mac 7600/120, AGENTS.md) and the only emulator that boots 8.x. Boots to the Finder at 800x600 thousands; unclean-shutdown warning off. Interpreter: much slower than QEMU, no timing value. PRAM/NVRAM (resolution) live next to the base image and are copied by `prepare`. |
 
 Recreating the QEMU base image (once, interactive): move the old image away,
 `EMU_ENGINE=qemu tools/os9-emu.sh install` (creates an empty 4 GB image).
@@ -48,6 +49,12 @@ In Drive Setup initialize it as **Mac OS Standard** (hfsutils cannot write
 Mac OS Extended), install, shut down from the Finder. Then with `gui`: set
 Monitors to 1024x768 thousands and turn off the unclean-shutdown warning in
 General Controls; delete the assistant aliases from Startup Items.
+
+Why not other options for 8.6 (2026-10-28): the 8.5 CD and an 8.6 disk with a
+New World `Mac OS ROM` (1.6, 2.5.1) do not boot in QEMU (OpenBIOS finds no
+bootable tbxi); SheepShaver emulates no real hardware (reports a G4, no 604).
+The pm8500 opens a second window for its AV video card; the default
+`AppleVision1710` monitor only offers 640x480.
 
 ## Rules
 

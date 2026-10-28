@@ -1,6 +1,6 @@
 ---
 name: ja2-profile
-description: Measure JA2 PPC performance on the real Mac OS 9 PowerBook with the built-in ja2prof frame profiler (JA2_PROFILE build, JA2PROF.csv, tools/ja2prof_report.py), compare runs, and judge results against the 603e/604 target budget. Use for any performance question, before and after optimizations, and when adding new screens or SGP subsystems.
+description: Measure JA2 PPC performance on the real Mac OS 9 PowerBook with the built-in ja2prof frame profiler (JA2_PROFILE build, JA2PROF.csv, tools/ja2prof_report.py), compare runs, and judge results against the 604/120 target budget. Use for any performance question, before and after optimizations, and when adding new screens or SGP subsystems.
 ---
 
 # Profiling JA2 PPC on Mac OS 9
@@ -57,7 +57,7 @@ skip_intros=1          # for menu/laptop scenes
 
 ## Budgets
 
-The design target is a 603e/604 at 100-120 MHz; the test machine is a
+The design target is a 604 at 120 MHz (AGENTS.md); the test machine is a
 G3 333 MHz (roughly 3-4x faster per clock-for-clock and frequency). Until a
 slower Mac is available:
 

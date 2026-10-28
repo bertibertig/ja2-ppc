@@ -27,11 +27,13 @@ that is version-gated (for example `BUILDING_FOR_PRE9`, or optional
 `DrawSprocket`/`InputSprocket` availability checks) must be exercised on an
 8.6 install, not only validated on 9.x.
 
-Hardware target: PowerPC 603e or 604 at 100-120 MHz, 32 MB RAM, SVGA
-(800x600). This is comparable to the original x86 requirements (Windows
-95/98, Pentium 133 MHz, 32 MB RAM, SVGA, 373 MB free disk space). See
-"Rendering And Performance" below for the display-depth policy that follows
-from real hardware differing in supported color depth.
+Hardware target (minimum): PowerPC 604 at 120 MHz (or a 603e at about
+160 MHz or more with L2 cache), 64 MB RAM, 800x600 at thousands of colors
+(1 MB VRAM), about 1 GB free disk space, Mac OS 8.6. Reference machine: Power
+Mac 7600/120, emulated by DingusPPC (`os9-emu` skill). See "Rendering And
+Performance" below for how this compares to the original x86 requirements
+and for the display-depth policy that follows from real hardware differing
+in supported color depth.
 
 ## Porting Rule
 
@@ -163,15 +165,36 @@ rendering or event-loop code.
 
 ## Rendering And Performance
 
-The PPC port must remain practical on a PowerPC 603e or 604 running at
-100-120 MHz and 32 MB of RAM with SVGA (800x600). This target is comparable
-to the original x86 requirements:
+The PPC port must remain practical on the minimum target above: a PowerPC
+604 at 120 MHz (or a 603e at 160 MHz or more with L2 cache) with 64 MB of RAM
+and 800x600 at thousands of colors. The original x86 requirements were:
 
 - Windows 95 or 98
 - Intel Pentium 133 MHz
 - 32 MB RAM
 - SVGA graphics adapter
 - 373 MB free disk space
+
+How the PPC target maps onto them (decided 2026-10-28):
+
+- CPU: a 604/120 matches a Pentium 133 in integer throughput. A 603e at
+  100-120 MHz is clearly slower (16 KB caches, often no L2, slow bus as in
+  the Performa 5200/6200), so it is not a supported target.
+- RAM: the application asks for a 32 MB partition (`SIZE` in `ja2_mac.r`)
+  and Mac OS 8.6 itself needs about 12-16 MB, so 32 MB of RAM would only
+  work with heavy virtual-memory paging. Windows 95 got by with 32 MB
+  because it pages transparently.
+- Display: the game runs windowed at 640x480, which needs a larger screen
+  for the menu bar, hence 800x600. VRAM only holds the screen: 800x600 at
+  16-bit needs 938 KB, so 1 MB is the minimum; all game surfaces (SDL
+  surfaces, GWorlds) live in main memory, so more VRAM does not help the
+  game. The DingusPPC reference machine uses 2 MB, the smallest it emulates.
+- Disk: the port copies the complete `Data/` tree (about 930 MB) instead of
+  running parts from CD.
+- Reaching this target needs the planned performance work: on the G3/333
+  test machine the main menu ran at 15.8 fps (2026-10-28), dominated by the
+  SDL event pump, and a 604/120 is roughly 3-4x slower. The SDL fork is
+  still built with `-O0` (`retro68/cmake/SDL2Classic.cmake`).
 
 The following QuickDraw-level guidance applies to the SDL2 backend fork's
 internals and to the Movie Toolbox GWorld interop in `Cinematics.c`, not to

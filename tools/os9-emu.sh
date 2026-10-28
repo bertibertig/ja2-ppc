@@ -10,12 +10,14 @@ set -euo pipefail
 #   tools/os9-emu.sh [prepare|deploy|run|collect|all|reset|install|gui]
 #
 # Engines (EMU_ENGINE):
-#   dingus  DingusPPC, Beige G3 (pmg3dt), Old World ROM, Mac OS 9.1 image
-#   qemu    QEMU mac99 (New World), needs a Mac OS 9.2.2 image; QEMU also
-#           writes guest screenshots via its monitor (EMU_SCREENSHOTS)
+#   qemu    QEMU mac99 (New World), Mac OS 9.2.2, mirrors the PowerBook G3
+#   dingus  DingusPPC Power Mac 7600/120 (Old World, 604), Mac OS 8.6: the
+#           low-end target and the only emulator that boots 8.x
+# Both write guest-only screenshots (EMU_SCREENSHOTS): QEMU via its monitor,
+# DingusPPC by capturing its own XWayland window, never the host desktop.
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-ENGINE="${EMU_ENGINE:-dingus}"
+ENGINE="${EMU_ENGINE:-qemu}"
 BUILD_DIR="${JA2_BUILD_DIR:-$ROOT_DIR/retro68/build-german-debug}"
 WORK_DIR="${EMU_WORK_DIR:-$EMU_WORK_DIR}"
 OUT_DIR="${EMU_OUT_DIR:-$ROOT_DIR/.emu-out}"
@@ -23,7 +25,15 @@ TIMEOUT="${EMU_TIMEOUT:-240}"
 HFS_BIN="${HFS_BIN:-$RETRO68_TOOLCHAIN/bin}"
 DINGUS_ROOT="${DINGUS_ROOT:-$DINGUS_ROOT}"
 DINGUS_BIN="${DINGUS_BIN:-$DINGUS_ROOT/build/bin/dingusppc}"
-DINGUS_BOOTROM="${DINGUS_BOOTROM:-$DINGUS_ROOT/build/bin/1997-11 - 78F57389 - Power Mac G3 (v3).ROM}"
+DINGUS_BASE_DIR="${DINGUS_BASE_DIR:-$EMU_WORK_DIR/base86}"
+DINGUS_BOOTROM="${DINGUS_BOOTROM:-$DINGUS_BASE_DIR/pm7600.rom}"
+# Low-end target: Power Mac 7600/120 (604 at 120 MHz), 64 MB, onboard
+# "control" video with 2 MB VRAM (the smallest DingusPPC emulates; AGENTS.md
+# asks for 1 MB) at 800x600 thousands (set in the guest's Monitors panel and
+# kept in PRAM). DingusPPC interprets instructions, so timing means nothing.
+# The pm8500 is avoided: its extra AV video card opens a second window.
+DINGUS_MACHINE=(-m pm7600 --cpu 604 --rambank1_size 64 --mon_id VGA-SVGA
+    --gfxmem_size 2)
 QEMU_BIN="${QEMU_BIN:-qemu-system-ppc}"
 EMU_SCREENSHOTS="${EMU_SCREENSHOTS:-20}"
 INSTALL_CD="${EMU_INSTALL_CD:-/path/to/media/Mac OS/OS 9/Mac OS D-9.2.2 iMac CD.iso}"
@@ -35,12 +45,15 @@ QEMU_MACHINE=(-M mac99,via=pmu -cpu 750 -m 384 -g 1024x768x16
     -device usb-kbd -device usb-mouse)
 
 case "$ENGINE" in
-    dingus) BASE_IMAGE="${EMU_BASE_IMAGE:-$VM_DIR/Powermac G3/macos91.img}" ;;
+    dingus) BASE_IMAGE="${EMU_BASE_IMAGE:-$DINGUS_BASE_DIR/macos86.img}" ;;
     qemu) BASE_IMAGE="${EMU_BASE_IMAGE:-$EMU_WORK_DIR/base/macos922.img}" ;;
     *) printf 'error: EMU_ENGINE must be dingus or qemu\n' >&2; exit 1 ;;
 esac
 WORK_IMAGE="$WORK_DIR/$ENGINE-work.img"
 DATA_STAMP="$WORK_DIR/$ENGINE-data.stamp"
+# DingusPPC keeps PRAM/NVRAM (screen resolution, startup disk) in its
+# working directory; test runs use a copy of the base image's state.
+DINGUS_STATE="$WORK_DIR/dingus-state"
 # hfsutils keeps its "current volume" state here; keep it out of $HOME.
 export HOME_HFS_STATE="$WORK_DIR/.hfs"
 
@@ -87,6 +100,11 @@ prepare() {
         printf 'copying %s -> %s\n' "$BASE_IMAGE" "$WORK_IMAGE"
         cp --sparse=always "$BASE_IMAGE" "$WORK_IMAGE"
         rm -f "$DATA_STAMP"
+        if [[ "$ENGINE" == dingus ]]; then
+            rm -rf "$DINGUS_STATE"
+            mkdir -p "$DINGUS_STATE"
+            cp "$(dirname "$BASE_IMAGE")"/{nvram,pram}.bin "$DINGUS_STATE"/ 2>/dev/null || true
+        fi
     fi
 }
 
@@ -129,12 +147,28 @@ deploy() {
 }
 
 run_dingus() {
+    local pid shot interval window
     [[ -x "$DINGUS_BIN" ]] || die "DingusPPC not found: $DINGUS_BIN"
     [[ -f "$DINGUS_BOOTROM" ]] || die "BootROM not found: $DINGUS_BOOTROM"
-    timeout --signal=INT --kill-after=10s "${TIMEOUT}s" \
-        "$DINGUS_BIN" -r -b "$DINGUS_BOOTROM" -m "${DINGUS_MACHINE:-pmg3dt}" \
-        --workingdir "$WORK_DIR" --hdd_img "$WORK_IMAGE" \
-        --log-to-stderr --log-no-uptime >"$OUT_DIR/emulator.log" 2>&1 || true
+    mkdir -p "$DINGUS_STATE"
+    # X11 (XWayland) so the window can be captured on its own.
+    SDL_VIDEODRIVER=x11 "$DINGUS_BIN" -r -b "$DINGUS_BOOTROM" "${DINGUS_MACHINE[@]}" \
+        --workingdir "$DINGUS_STATE" --hdd_img "$WORK_IMAGE" \
+        --log-to-stderr --log-no-uptime >"$OUT_DIR/emulator.log" 2>&1 &
+    pid=$!
+    interval=$(( TIMEOUT / (EMU_SCREENSHOTS > 0 ? EMU_SCREENSHOTS : 1) ))
+    for (( shot = 1; shot <= EMU_SCREENSHOTS; ++shot )); do
+        sleep "$interval"
+        kill -0 "$pid" 2>/dev/null || break
+        window=$(xdotool search --pid "$pid" --name "DingusPPC Display" 2>/dev/null | head -1) || true
+        [[ -n "$window" ]] && import -window "$window" \
+            "$(printf '%s/screen-%02d.png' "$OUT_DIR" "$shot")" 2>/dev/null || true
+    done
+    (( EMU_SCREENSHOTS > 0 )) || sleep "$TIMEOUT"
+    kill -INT "$pid" 2>/dev/null || true
+    sleep 5
+    kill -9 "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
 }
 
 run_qemu() {
@@ -192,7 +226,13 @@ install_os() {
 # Delete the working copy afterwards ('reset') so tests pick the change up.
 gui() {
     [[ -f "$BASE_IMAGE" ]] || die "base OS image not found: $BASE_IMAGE"
-    run_qemu_gui -boot c
+    if [[ "$ENGINE" == dingus ]]; then
+        # Native SDL driver: it locks the pointer (Ctrl+G) under Wayland.
+        "$DINGUS_BIN" -r -b "$DINGUS_BOOTROM" "${DINGUS_MACHINE[@]}" \
+            --workingdir "$(dirname "$BASE_IMAGE")" --hdd_img "$BASE_IMAGE"
+    else
+        run_qemu_gui -boot c
+    fi
 }
 
 # The guest only has a relative USB mouse, so QEMU must lock the pointer.
@@ -200,7 +240,7 @@ gui() {
 # the SDL UI (qemu-ui-sdl) locks it properly, so prefer it when installed.
 run_qemu_gui() {
     local display=gtk,grab-on-hover=on
-    [[ "$ENGINE" == qemu ]] || die "install/gui need EMU_ENGINE=qemu"
+    [[ "$ENGINE" == qemu ]] || die "install needs EMU_ENGINE=qemu"
     command -v "$QEMU_BIN" >/dev/null || die "$QEMU_BIN not installed (pacman -S qemu-system-ppc)"
     [[ -f /usr/lib/qemu/ui-sdl.so ]] && display=sdl
     "$QEMU_BIN" "${QEMU_MACHINE[@]}" "$@" \
@@ -232,7 +272,7 @@ case "${1:-all}" in
     run) run ;;
     collect) collect ;;
     all) prepare; deploy; run; collect ;;
-    reset) rm -f "$WORK_IMAGE" "$DATA_STAMP"; prepare ;;
+    reset) rm -f "$WORK_IMAGE" "$DATA_STAMP"; rm -rf "$DINGUS_STATE"; prepare ;;
     install) install_os ;;
     gui) gui ;;
     *) die "usage: $0 [prepare|deploy|run|collect|all|reset|install|gui]" ;;
