@@ -72,6 +72,30 @@ byte-swapped explicitly at their load/save sites. The current hand-written
 menu, credits and laptop screens are replaced once the original screen runs
 on the new SGP. `ja2-master/` is never edited.
 
+### Standard Gaming Platform layer (Phase 1, 2026-10-28)
+
+- Ported so far: `FileMan.c`, `LibraryDataBase.c`, `Container.c`,
+  `Random.c`, `timer.c`, `DEBUG.C` (Mac reimplementation on `DebugLog`),
+  with their headers, plus `builddefines.h` and `Language Defines.h`
+  (language from `JA2_LANGUAGE`).
+- `sgp_win32.h/.c`: the Win32 subset the SGP calls (CreateFile/ReadFile/
+  SetFilePointer, Find*, directories, attributes, file times), on stdio
+  with 64 KB buffers and the File Manager. Game paths stay in Windows form
+  and map below the application folder (`..\\Ja2.ini`, `Data\\...`).
+- `sgp_platform.h` (included by `Types.h` under JA2_PPC): MSVC-compatible
+  `rand()`/`RAND_MAX` 0x7fff (the original `Random()` and save games
+  depend on it), `fopen` routed through the same path mapping, `_stricmp`
+  family.
+- `sgp_endian.h`: `SGPReadLE16/32`, `SGP_SWAP_LE16/32` for every load site.
+  The GCC/PPC struct layout of the on-disk headers matches MSVC (checked
+  with compile-time size asserts); only the byte order is converted.
+- Include spellings from the case-insensitive x86 tree are aliased by
+  `tools/gen_case_includes.py` (CMake configure step); SGP sources use
+  `-iquote` only, so Mac headers such as `<Timer.h>` are never shadowed.
+- Verification: `tools/sgp_host_test.sh` runs `retro68/ja2_sgp_selftest.c`
+  on the build host against a bundle; the autotest command `sgptest` runs
+  the same checks on the Mac (`tests/autotest/sgp.txt`).
+
 ## Original Source Requirement
 
 Before implementing, translating, or modifying any feature, always reference

@@ -57,6 +57,10 @@ cmake --build retro68/build-german-debug
 
 Avoid `--clean-first` unless needed: it re-copies the full `Data/` tree.
 
+SGP core check on the host (after touching `retro68/Standard Gaming
+Platform/`): `tools/sgp_host_test.sh` (all lines `ok`, `failures=0`), then
+`tests/autotest/sgp.txt` on the PowerBook via `tools/machw.py autotest`.
+
 Smacker decoder check on the host (after touching `retro68/Smacker/`):
 `cc -O2 -I retro68/Smacker -o /tmp/smktest tools/smktest.c
 retro68/Smacker/smacker.c`, run it on an SMK extracted from `Intro.slf` and

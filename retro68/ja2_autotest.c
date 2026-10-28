@@ -3,6 +3,7 @@
 #include "ja2_mac_internal.h"
 #include "ja2_options.h"
 #include "ja2_prof.h"
+#include "ja2_sgp_selftest.h"
 
 #include <SDL.h>
 #include <stdarg.h>
@@ -23,6 +24,8 @@
  *                        (main, new_game, difficulty, intro, load_game,
  *                        options, credits, laptop)
  *   waitfor <screen> <ms> pause until that screen shows; fail after ms
+ *   sgptest              run the Standard Gaming Platform self-test
+ *                        (ja2_sgp_selftest.c); each failed check counts
  *   mark <label>         profiler marker (profile builds) + log line
  *   log <text>           log line
  *   timeout <s>          watchdog, quits with result=timeout (default 600)
@@ -323,6 +326,10 @@ static Boolean RunCommand(char *line)
     }
     if (strcmp(command, "expect") == 0) {
         Expect(argument);
+        return 0;
+    }
+    if (strcmp(command, "sgptest") == 0) {
+        gFailures += (short)JA2SGPSelfTest(AutotestLog);
         return 0;
     }
     if (strcmp(command, "mark") == 0) {

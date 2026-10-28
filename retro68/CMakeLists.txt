@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.9)
+cmake_minimum_required(VERSION 3.10)
 project(JA2PPCMac C)
 
 set(JA2_DATA_DIR "" CACHE PATH "JA2 installation directory containing Data/")
@@ -23,6 +23,39 @@ endif()
 # retro68/JA2_PPC_SDL2_MIGRATION_PLAN.md for the required link/stub policy.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SDL2Classic.cmake)
 
+# Standard Gaming Platform: the original SGP sources at their mapped paths,
+# changed only behind JA2_PPC, plus the Win32 compatibility layer
+# (sgp_win32.c). See CLAUDE.md "Architecture decision".
+set(JA2_SGP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Standard Gaming Platform")
+set(JA2_SGP_SOURCES
+    "${JA2_SGP_DIR}/sgp_win32.c"
+    "${JA2_SGP_DIR}/DEBUG.C"
+    "${JA2_SGP_DIR}/Container.c"
+    "${JA2_SGP_DIR}/FileMan.c"
+    "${JA2_SGP_DIR}/LibraryDataBase.c"
+    "${JA2_SGP_DIR}/Random.c"
+    "${JA2_SGP_DIR}/timer.c"
+)
+# The x86 sources spell headers in several cases ("types.h", "DEBUG.H");
+# give each spelling an alias for the case-sensitive host file system.
+set(JA2_CASE_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/case-include")
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_case_includes.py"
+        "${JA2_CASE_INCLUDE_DIR}" "${JA2_SGP_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE JA2_CASE_INCLUDE_RESULT)
+if(NOT JA2_CASE_INCLUDE_RESULT EQUAL 0)
+    message(FATAL_ERROR "gen_case_includes.py failed")
+endif()
+# Quoted includes only (-iquote), so Mac headers such as <Timer.h> and
+# <Types.h> never resolve to SGP headers of the same name. The original
+# code's own warnings are not fixed in place.
+set_source_files_properties(${JA2_SGP_SOURCES} ja2_sgp_selftest.c PROPERTIES
+    COMPILE_DEFINITIONS "JA2;JA2_PPC"
+    COMPILE_OPTIONS "-iquote;${JA2_SGP_DIR};-iquote;${CMAKE_CURRENT_SOURCE_DIR};-iquote;${JA2_CASE_INCLUDE_DIR};-Wno-unused-variable;-Wno-unused-but-set-variable;-Wno-multichar;-Wno-format;-Wno-pointer-sign;-Wno-int-to-pointer-cast;-Wno-comment")
+# DEBUG.C keeps its original upper-case name; gcc would treat ".C" as C++.
+set_property(SOURCE "${JA2_SGP_DIR}/DEBUG.C" APPEND PROPERTY COMPILE_OPTIONS "-x;c")
+
 add_application(JA2PPC
     ja2_autotest.c
     ja2_autotest.h
@@ -45,6 +78,9 @@ add_application(JA2PPC
     ja2/Build/Utils/Cinematics.h
     Smacker/smacker.c
     Smacker/smacker.h
+    ${JA2_SGP_SOURCES}
+    ja2_sgp_selftest.c
+    ja2_sgp_selftest.h
     ja2/Build/Intro.c
     ja2/Build/Intro.h
     ja2_music.c
