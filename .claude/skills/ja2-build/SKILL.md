@@ -57,9 +57,13 @@ cmake --build retro68/build-german-debug
 
 Avoid `--clean-first` unless needed: it re-copies the full `Data/` tree.
 
-SGP core check on the host (after touching `retro68/Standard Gaming
-Platform/`): `tools/sgp_host_test.sh` (all lines `ok`, `failures=0`), then
-`tests/autotest/sgp.txt` on the PowerBook via `tools/machw.py autotest`.
+Fast logic check on the host (after touching game or SGP code):
+`tools/host_run.sh [--gdb]` builds the same sources as a 32-bit headless
+Linux program (needs `gcc -m32`) and runs it against the bundle;
+`SGP_HOST_SCRIPT="600 click 318 286;900 shot gio"` drives it (frame numbers,
+~10 ms each), `SGP_HOST_OUT` receives PPM screenshots. Then the real test:
+`tests/autotest/phase2-menus.txt` via `tools/machw.py autotest` (PowerBook)
+or `EMU_AUTOTEST=` with `tools/os9-emu.sh` (QEMU when no real Mac is up).
 
 Smacker decoder check on the host (after touching `retro68/Smacker/`):
 `cc -O2 -I retro68/Smacker -o /tmp/smktest tools/smktest.c

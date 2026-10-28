@@ -1,7 +1,8 @@
 # Main menu states for comparison with the Windows reference (winref skill):
 # same coordinates and timing as .winref-out/menucheck/win-*.png.
 timeout 180
-wait 6000
+# Startup (Init, splash fade) takes about 15 s in QEMU.
+wait 20000
 expect main
 shot menu
 move 318 397

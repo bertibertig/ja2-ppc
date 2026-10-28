@@ -1,17 +1,22 @@
 # New game -> difficulty OK -> the four intro videos -> laptop.
-# Run with skip_intros=0. Video stats ("Video: stats ...") land in
+# Video stats ("SGP smack: stats ...") land in
 # JA2PPC-Debug.log; profile builds also record the movie/present zones.
 timeout 480
-wait 6000
+# Startup (Init, splash fade) takes about 15 s in QEMU.
+wait 20000
 expect main
-click 320 290
-wait 2000
+click 318 286
+wait 3000
 expect difficulty
-key Return
+click 200 437
 wait 2000
+expect msgbox
+click 278 314
+wait 8000
 expect intro
 mark intro
-wait 6000
+# Startup (Init, splash fade) takes about 15 s in QEMU.
+wait 20000
 shot intro_rebel
 waitfor laptop 420000
 mark laptop

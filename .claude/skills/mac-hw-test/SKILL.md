@@ -30,7 +30,7 @@ session) and does steps 1-4 below in one command:
 
 ```sh
 python3 tools/machw.py autotest tests/autotest/smoke.txt \
-  --build retro68/build-german-debug --set skip_intros=1 [--capture 75]
+  --build retro68/build-german-debug [--capture 75]
 ```
 
 - The script format is documented at the top of `retro68/ja2_autotest.c`
@@ -48,7 +48,8 @@ python3 tools/machw.py autotest tests/autotest/smoke.txt \
 
 Comparing with the Windows original: take the same states in the
 reference (`winref` skill, same coordinates and waits; e.g.
-`tests/autotest/menu-compare.txt` mirrors a winref click sequence), then
+`tests/autotest/menu-compare.txt` and `phase2-menus.txt` mirror winref
+click sequences), then
 `python3 tools/compare_screens.py WIN.png MAC.png OUT` reports the share of
 matching pixels (5 bits per channel, one step tolerance), the differing
 32x32 areas and writes OUT-side.png (Windows | Mac | differences in

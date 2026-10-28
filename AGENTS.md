@@ -48,10 +48,6 @@ repository's `ja2/Build/` path beneath `retro68/`.
   `retro68/Intro.c`.
 - Do not place a reimplementation at a path such as
   `retro68/ja2/Build/Utils/Cinematics.c` merely to match the original tree.
-  (`retro68/ja2/Build/Intro.c` and `retro68/ja2/Build/Utils/Cinematics.c`
-  currently violate this rule as a pre-existing exception; do not copy that
-  layout for new files, and treat correcting those two paths as a separate,
-  explicit cleanup task.)
 - Port code into the PPC counterpart of the original source file instead of
   accumulating game logic in a central platform or shell file.
 - Preserve the original ownership of state, call flow, and lifecycle functions.
@@ -68,9 +64,62 @@ each screen. Original game files are copied into their mapped `retro68/`
 paths and changed only behind `#ifdef JA2_PPC`; the SGP lives under
 `retro68/Standard Gaming Platform/` with the original file names. All
 little-endian on-disk formats (SLF, STCI, maps, `.edt`, save games) are
-byte-swapped explicitly at their load/save sites. The current hand-written
-menu, credits and laptop screens are replaced once the original screen runs
-on the new SGP. `ja2-master/` is never edited.
+byte-swapped explicitly at their load/save sites. `ja2-master/` is never
+edited.
+
+### Game layer (Phase 2, 2026-10-28)
+
+- The app starts through the original `sgp.c` (`SDL_main`, since
+  SDL2main owns `main`), `gameloop.c` and the `SCREENS.C` table. Ported
+  game files: `Init.c`, `jascreens.c`, `Sys Globals.c`, `GameSettings.c`,
+  `GameVersion.c`, `JA2 Splash.c`, `Intro.c`, `MainMenuScreen.c`,
+  `Credits.c`, `GameInitOptionsScreen.c`, `Options Screen.c`,
+  `MessageBoxScreen.c`, `Fade Screen.c`, most of `Utils/` (fonts, cursors,
+  text, music and sound control, timers, cinematics) and
+  `TileEngine/Render Dirty.c`, `sysutil.c`. The hand-written shell is gone.
+- Every original header is copied to its mapped path, so no compile reads
+  `ja2-master`. Game files build with `PRECOMPILEDHEADERS` (the x86 build
+  used "JA2 All.h") and `-std=gnu99` (GCC 16 defaults to C23, where `()`
+  means `(void)`), Latin-1 input and 16-bit `wchar_t`.
+- `ja2_ppc_unported.c`: logged stand-ins for the modules not ported yet
+  (tactical, strategic, laptop, save/load), grouped by original file, with
+  the original initial values. Screens without a port show a notice and
+  return to the main menu. Remove a group when its file is ported.
+- Text: `.edt` files and other wide-text loads hold little-endian 16-bit
+  characters; swap them at the load site (`Encrypted File.c`,
+  `Text Utils.c`). Where the German 1.12.1 release (GOG `ja2.exe`) has
+  newer text than `_GermanText.c`, the port uses the release's text behind
+  `JA2_PPC` (game options screen, Ironman messages).
+
+### Platform layer
+
+- `sgp_win32_msg.c`: window messages (`PeekMessage`/`GetMessage`/
+  `DispatchMessage` to the original WindowProcedure), the keyboard and
+  mouse hooks of `input.c`, multimedia timers (`timeSetEvent` as a Time
+  Manager task, so `Timer Control.c`'s 10 ms clock runs as on Windows) and
+  INI files.
+- `sgp_sdl.c`: the only SGP file that uses SDL. Turns SDL events into those
+  hooks with Windows virtual-key and scan codes (German layout;
+  Control-click = right button for one-button mice), presents each flipped
+  frame (RGB555 -> window format), Command-Q quits.
+- `sgp_mss.c`: the Miles 2D API under the original `soundman.c`, on the
+  Sound Manager (one reused channel per sample/stream, PCM 8/16-bit;
+  streams read the WAV from the SLF library in 64 KB buffers). 16-bit
+  samples are swapped once at load (`SoundProcessWAVHeader`).
+- `sgp_smack.c`: the Smacker SDK calls of the original `Cinematics.c` on
+  `retro68/Smacker/smacker.c`; frames go into `FRAME_BUFFER` as on Windows,
+  audio to a Sound Manager channel, skipped frames keep picture and sound
+  in sync.
+- `sgp_wchar.c`: MSVC's wide-string runtime (`swprintf` without size,
+  `%s` = wide, `%S` = narrow, two-argument `wcstok`).
+- `win32-include/`: stand-ins for `<windows.h>`, `<tchar.h>` etc. that
+  include `sgp_win32.h`. Port files include Mac/SDL headers before
+  `sgp_win32.h`; its `ShowCursor`/`ShowWindow` macros clash with the
+  Toolbox otherwise.
+- Debugging: `tools/host_run.sh [--gdb]` builds the same sources as a
+  32-bit headless Linux program (`tools/host/sgp_host.c`: scripted input,
+  PPM screenshots, ~10 ms per frame). It finds logic errors quickly; byte
+  order and Toolbox issues only show on the Mac.
 
 ### Standard Gaming Platform layer (Phase 1, 2026-10-28)
 
@@ -92,11 +141,10 @@ on the new SGP. `ja2-master/` is never edited.
 - Include spellings from the case-insensitive x86 tree are aliased by
   `tools/gen_case_includes.py` (CMake configure step); SGP sources use
   `-iquote` only, so Mac headers such as `<Timer.h>` are never shadowed.
-- Verification: `tools/sgp_host_test.sh` runs `retro68/ja2_sgp_selftest.c`
-  on the build host against a bundle; the autotest command `sgptest` runs
-  the same checks on the Mac (`tests/autotest/sgp.txt`).
+- Verification (Phase 1): an SGP self-test, replaced in Phase 2 by the
+  original screens and the comparison with the Windows reference.
 
-### SGP video layer (Phase 2, 2026-10-28)
+### SGP video layer (Phase 1, 2026-10-28)
 
 - Ported: `himage.c`, `STCI.c`, `PCX.C`, `impTGA.c`, `shading.c`,
   `vobject.c`, `vobject_blitters.c`, `vsurface.c`, `video.c`,
@@ -107,8 +155,8 @@ on the new SGP. `ja2-master/` is never edited.
   DirectDraw semantics. `gfDontUseDDBlits` stays FALSE as on Windows (the
   original's software fallback fills rectangles one pixel larger). The
   primary surface is a real flip chain; `Flip` swaps the buffers and hands
-  the new front buffer to `gpSGPDDPresent`, which the shell (ja2_mac.c)
-  draws into the SDL window. `video.c`'s RefreshScreen (dirty regions,
+  the new front buffer to `gpSGPDDPresent`, which `sgp_sdl.c` draws into
+  the SDL window. `video.c`'s RefreshScreen (dirty regions,
   mouse buffer, restore after flip) is the original full-screen path.
 - Blitters: every x86 `__asm` block in `vobject_blitters.c` is wrapped in
   `#ifdef JA2_PPC`. The C versions use the macros in `sgp_blit_c.h`, which
@@ -117,13 +165,9 @@ on the new SGP. `ja2-master/` is never edited.
   shadow, outline, mirror, half, 16-bit copies, fills, shadow rects). The
   Z-buffer/tactical and 8-bit-destination blitters log
   `SGP: blitter X is not ported yet` and return FALSE until Phase 4.
-- `sgp_video_game.c` holds idle stand-ins (initial values) for the game
-  globals video.c reads (scrolling, fades, viewport); remove each when its
-  original module is ported.
-- Verification: `tools/sgp_reference.py` decodes the same STIs from the
-  SLF archives in Python and must give the checksum the video self-test
-  reports (`tests/autotest/sgp-video.txt`, autotest command `sgpvideo`);
-  host, reference and PowerBook all give `63ebf31d`.
+  Phase 2 added `Blt16BPPBufferPixelateRectWithColor` (disabled buttons).
+- Verification: `tests/autotest/phase2-menus.txt` plus
+  `tools/compare_screens.py` against the Windows reference (winref skill).
 
 ## Original Source Requirement
 
@@ -167,8 +211,8 @@ The platform shell renders through SDL2, using the
 only SDL2 fork targeting classic Mac OS 7/8/9 m68k/PPC via Retro68), not
 directly through QuickDraw. See `retro68/JA2_PPC_SDL2_MIGRATION_PLAN.md` for
 the full migration plan, dependency audit, build integration approach, and
-staged replacement order; consult it before touching `retro68/ja2_mac.c`'s
-rendering or event-loop code.
+staged replacement order. Since Phase 2 the only SDL user is
+`retro68/Standard Gaming Platform/sgp_sdl.c`.
 
 - SDL2 on classic Mac OS does not replace QuickDraw; the backend
   (`SDL-main/src/video/macosclassic/`) is implemented on top of `NewCWindow`,
@@ -181,11 +225,9 @@ rendering or event-loop code.
 - Movies: the original played its `.SMK` files with RAD's Smacker SDK
   straight into the 16-bit frame buffer. The port decodes the same files
   from `Intro.slf` with `retro68/Smacker/smacker.c` (verified bit-identical
-  to FFmpeg with `tools/smktest.c`) at their native 15 fps and writes each
-  frame into the window surface through a palette lookup built with
-  `SDL_MapRGB`, which is the one sanctioned exception to the RGB555
-  intermediate-surface rule below. Do not reintroduce QuickTime or a host
-  conversion step.
+  to FFmpeg with `tools/smktest.c`) at their native 15 fps, behind the
+  original `Cinematics.c` (`sgp_smack.c`), into the RGB555 frame buffer.
+  Do not reintroduce QuickTime or a host conversion step.
 - Color depth is fixed at 16-bit `SDL_PIXELFORMAT_RGB555` for every game
   surface (menu, credits, cursor compositing, decoded intro frames),
   regardless of the actual display depth SDL2 detects from the active
@@ -214,10 +256,8 @@ rendering or event-loop code.
   `BUILDING_FOR_PRE9` code path exist for the 8.6-9.2.2 target range in
   "Toolchain And Target Platform" above; keep them enabled and verify them
   on an 8.6 install rather than assuming 9.x coverage is sufficient.
-- Replace QuickDraw window/event code in verified stages (window/event loop,
-  then menu/splash, then cursor, then credits/options, then cinematics
-  presentation) per the migration plan; do not attempt a single
-  unverifiable rewrite of `ja2_mac.c`.
+- The SGP draws its own mouse cursor into the frame (video.c's mouse
+  buffer); the system cursor stays hidden.
 
 ## Rendering And Performance
 

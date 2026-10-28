@@ -1,8 +1,9 @@
 # Profiler scene: main menu, idle 10 s, then hover over the five buttons.
-# Run with: --set profile_uncapped=1 --set skip_intros=1 --set show_fps=0
+# Run with: --set profile_uncapped=1 --set show_fps=0
 #           --set profile_label=menu   (profile_frames stays 0)
 timeout 300
-wait 6000
+# Startup (Init, splash fade) takes about 15 s in QEMU.
+wait 20000
 expect main
 mark menu_idle
 wait 10000

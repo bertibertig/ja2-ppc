@@ -1,23 +1,13 @@
 # JA2 PPC Mac target
 
-This directory contains the first native platform slice for a System 9
-PowerPC port. It builds a classic `APPL` using Retro68's
-`powerpc-apple-macos` toolchain and replaces the original Win32/DirectDraw
-window and event loop with QuickDraw and `WaitNextEvent`.
-
-The PPC sources are kept in the same subsystem boundaries as the original
-source where they have been migrated: `ja2_mac.c` contains the platform shell
-and event loop, `ja2_game_init_options.c` contains the game-start options
-screen, and `ja2_new_game_init.c` contains the first PPC `InitNewGame(FALSE)`
-boundary. Their headers expose only the small interfaces needed between these
-subsystems.
-
-The checked-in game source is not yet a complete Mac port. The historical
-source calls Win32, DirectDraw, DirectSound, Miles Sound System, registry,
-and other APIs throughout the SGP and game modules. The original game data
-files are also not part of this repository. Consequently, this target is a
-runnable native platform shell, not a claim that the full game has already
-been migrated.
+This directory contains the Mac OS 8.6-9.2.2 PowerPC port of JA2, built
+with Retro68's `powerpc-apple-macos` toolchain. The original game sources
+are copied here at their mapped paths (`ja2/Build/X` -> `retro68/X`) and
+compiled with changes behind `#ifdef JA2_PPC`, on a Mac reimplementation of
+the Standard Gaming Platform (`Standard Gaming Platform/`, with the
+`sgp_*.c` platform files). Modules not ported yet are logged stand-ins in
+`ja2_ppc_unported.c`. See `../AGENTS.md` ("Port Architecture") for the
+details. The game data is not part of this repository.
 
 ## Build
 

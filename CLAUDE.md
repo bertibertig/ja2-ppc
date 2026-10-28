@@ -24,8 +24,9 @@ the ~270k lines of original game code, so the port moves to this model:
   little-endian and was read as raw structs on x86. Each load/save site gets
   explicit byte swapping; never rely on struct layout or `#pragma pack`
   matching MSVC. Build with `-fshort-wchar` (JA2 strings are 16-bit).
-- The existing hand-written screens (main menu, credits, laptop) stay until
-  the original screen runs on the new SGP, then are removed.
+- Since Phase 2 (2026-10-28) the app runs the original game loop and
+  screens; modules not ported yet are logged stand-ins in
+  `retro68/ja2_ppc_unported.c` (see AGENTS.md "Game layer").
 
 ## Tooling
 
