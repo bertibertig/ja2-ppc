@@ -50,6 +50,18 @@ void		CDromEjectionErrorMessageBoxCallBack( UINT8 bExitValue );
 
 
 
+#ifdef JA2_PPC
+#include "sgp_endian.h"
+
+// JA2 PPC: Ja2.set is the little-endian GAME_SETTINGS struct of the x86
+// game; only its two UINT32 fields need their byte order converted.
+static void SwapGameSettings( GAME_SETTINGS *pSettings )
+{
+	SGP_SWAP_LE32( pSettings->uiSettingsVersionNumber );
+	SGP_SWAP_LE32( pSettings->uiMeanwhileScenesSeenFlags );
+}
+#endif
+
 BOOLEAN LoadGameSettings()
 {
 	HWFILE	hFile;
@@ -76,6 +88,9 @@ BOOLEAN LoadGameSettings()
 		}
 
 		FileRead( hFile, &gGameSettings, sizeof( GAME_SETTINGS ), &uiNumBytesRead );
+#ifdef JA2_PPC
+		SwapGameSettings( &gGameSettings );
+#endif
 		if( uiNumBytesRead != sizeof( GAME_SETTINGS ) )
 		{
 			FileClose( hFile );
@@ -179,7 +194,13 @@ BOOLEAN	SaveGameSettings()
 	gGameSettings.uiSettingsVersionNumber = GAME_SETTING_CURRENT_VERSION;
 
 	//Write the game settings to disk
+#ifdef JA2_PPC
+	SwapGameSettings( &gGameSettings );
+#endif
 	FileWrite( hFile, &gGameSettings, sizeof( GAME_SETTINGS ), &uiNumBytesWritten );
+#ifdef JA2_PPC
+	SwapGameSettings( &gGameSettings );
+#endif
 	if( uiNumBytesWritten != sizeof( GAME_SETTINGS ) )
 	{
 		FileClose( hFile );

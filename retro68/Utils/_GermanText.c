@@ -3329,7 +3329,12 @@ STR16 gzGIOScreenText[] =
 	L"Abbrechen",
 	L"Extraschwer",
 	L"Ohne Zeitlimit",
+#ifdef JA2_PPC
+	// JA2 PPC: as in the German 1.12.1 release (GOG ja2.exe).
+	L"Ironman",
+#else
 	L"Mit Zeitlimit",
+#endif
 	L"Option nicht verfügbar", 
 };
 

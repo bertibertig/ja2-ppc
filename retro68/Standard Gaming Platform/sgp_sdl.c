@@ -45,6 +45,7 @@ void DebugLog(const char *format, ...)
     /* Opened per line so the log survives a crash. */
     file = fopen("JA2PPC-Debug.log", "a");
     if (file != NULL) {
+        fprintf(file, "%7lu ", (unsigned long)SDL_GetTicks());
         fputs(line, file);
         fputc('\n', file);
         fclose(file);

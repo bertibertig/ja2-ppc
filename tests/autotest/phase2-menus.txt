@@ -1,0 +1,44 @@
+# Original menu screens on the Mac SGP: main menu, credits, options,
+# new game (game options, confirmation, intro movie, laptop).
+# Coordinates match the Windows reference (winref skill).
+timeout 300
+# Startup (Init, splash fade) takes about 15 s in QEMU.
+wait 20000
+expect main
+shot menu
+move 318 397
+wait 1000
+shot hover_credits
+click 318 397
+wait 3000
+expect credits
+shot credits
+wait 4000
+shot credits_later
+key Escape
+wait 2500
+expect main
+click 318 360
+wait 3000
+expect options
+shot options
+key Escape
+wait 2500
+expect main
+click 318 286
+wait 3000
+expect difficulty
+shot difficulty
+click 200 437
+wait 2000
+expect msgbox
+shot confirm
+click 278 314
+wait 8000
+expect intro
+shot intro
+key Escape
+wait 4000
+expect laptop
+shot laptop
+quit

@@ -5,6 +5,9 @@
 	#include "FileMan.h"
 	#include "Debug.h"
 #endif
+#ifdef JA2_PPC
+#include "sgp_endian.h"
+#endif
 
 #include "Language Defines.h"
 
@@ -36,6 +39,10 @@ BOOLEAN LoadEncryptedDataFromFile(STR pFileName, STR16 pDestString, UINT32 uiSee
 		DebugMsg( TOPIC_JA2, DBG_LEVEL_3, "LoadEncryptedDataFromFile: Failed FileRead");
 		return( FALSE );
 	}
+	#ifdef JA2_PPC
+	// JA2 PPC: the text files hold little-endian 16-bit characters.
+	SGPSwapLE16Array( pDestString, uiSeekAmount / 2 );
+	#endif
 
 	// Decrement, by 1, any value > 32
 	for(i=0; (i<uiSeekAmount) && (pDestString[i] != 0); i++ )

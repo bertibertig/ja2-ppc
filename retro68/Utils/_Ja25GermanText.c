@@ -31,8 +31,14 @@ STR16	zNewTacticalMessages[]=
 	L"%s hört das Geräusch knirschenden Metalls unter Jerry hervordringen. Es klingt grässlich - die Antenne ihres Laptop-Computers ist  zerstört.",  //the %s is the name of a merc.  @@@  Modified
 	L"Nach Ansehen des Hinweises, den Commander Morris hinterließ, erkennt %s eine einmalige Gelegenheit. Der Hinweis enthält Koordinaten für den Start von Raketen gegen verschiedene Städte in Arulco. Aber er enthält auch die Koordinaten des Startpunktes - der Raketenanlage.",
 	L"Das Kontroll-Board studierend, entdeckt %s, dass die Zahlen umgedreht werden könnten, so dass die Raketen diese Anlage selbst zerstören. %s muss nun einen Fluchtweg finden. Der Aufzug scheint die schnellstmögliche Route zu bieten...",         //!!! The original reads:	L"Noticing the control panel %s, figures the numbers can be reversed..." That sounds odd for me, but I think the comma is placed one word too late... (correct?)
+#ifdef JA2_PPC
+	// JA2 PPC: as in the German 1.12.1 release (GOG ja2.exe).
+	L"Dies ist ein Ironman-Spiel, und es kann nicht gespeichert werden, wenn sich Gegner in der Nähe befinden.",
+	L"(Speichen im Kampf nicht möglich)",
+#else
 L"Dies ist ein IRON MAN-Spiel, und es kann nicht gespeichert werden, wenn sich Gegner in der Nähe befinden.",		
 	L"(Kann während Kampf nicht speichern)", 
+#endif
 	L"Der Name der aktuellen Kampagne enthält mehr als 30 Buchstaben.",						
 	L"Die aktuelle Kampagne kann nicht gefunden werden.",																	
 	L"Kampagne: Standard ( %S )",																							
@@ -44,7 +50,12 @@ L"Dies ist ein IRON MAN-Spiel, und es kann nicht gespeichert werden, wenn sich G
 //@@@:  New string as of March 3, 2000.
 STR16	gzIronManModeWarningText[]=
 {
+#ifdef JA2_PPC
+	// JA2 PPC: the German text of the 1.12.1 release (GOG ja2.exe).
+	L"Sie haben sich für den Ironman-Modus entschieden. Mit dieser Einstellung können Sie das Spiel nicht speichern, wenn Feinde im Sektor sind. Sind sie sicher, daß Sie im Ironman-Modus spielen wollen?",
+#else
 	L"You have chosen IRON MAN mode. This setting makes the game considerably more challenging as you will not be able to save your game when in a sector occupied by enemies. This setting will affect the entire course of the game.  Are you sure want to play in IRON MAN mode?",
+#endif
 };
 
 

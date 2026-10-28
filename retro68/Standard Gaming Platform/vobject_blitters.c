@@ -12779,7 +12779,29 @@ BOOLEAN Blt16BPPBufferPixelateRectWithColor(UINT16 *pBuffer, UINT32 uiDestPitchB
 	CHECKF(height >=1);
 
 #ifdef JA2_PPC
-	SGP_BLIT_NOT_PORTED( "Blt16BPPBufferPixelateRectWithColor" );
+	// As the assembly: byte compares; the pattern index (ebx) restarts at 0
+	// on every line, so the first pixel of each line reads Pattern[0][0],
+	// and the following ones read column | row offset (edx, 8 per line).
+	{
+		UINT8 *pPattern = (UINT8 *)Pattern;
+		UINT16 *pDest = DestPtr;
+		UINT32 uiRow = 0;
+		INT32 iLines = height;
+		do
+		{
+			UINT32 uiIndex = 0;
+			INT32 iCount = width;
+			do
+			{
+				if( pPattern[ uiIndex ] != 0 )
+					*pDest = usColor;
+				pDest++;
+				uiIndex = ( ( uiIndex + 1 ) & 0x07 ) | uiRow;
+			} while( --iCount );
+			pDest = (UINT16 *)( (UINT8 *)pDest + LineSkip );
+			uiRow = ( uiRow + 8 ) & 0x38;
+		} while( --iLines );
+	}
 #else
 	__asm {
 		mov		esi, Pattern				// Pointer to pixel pattern

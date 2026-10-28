@@ -192,9 +192,29 @@ void UnPauseGame( ) { }
 void UpdateClock( ) { }
 void WarpGameTime( UINT32 uiAdjustment, UINT8 ubWarpCode ) { NOT_PORTED( "WarpGameTime", "Strategic/Game Clock.c" ); }
 
+UINT8 gubScreenCount = 0;
+
+// The screen flow of the original: reset, then on the first call after the
+// intro switch to the laptop. Profiles, laptop, strategic layer, e-mails and
+// the starting cash wait for their modules.
 BOOLEAN InitNewGame( BOOLEAN fReset )
 {
+	if( fReset )
+	{
+		gubScreenCount = 0;
+		return( TRUE );
+	}
 	NOT_PORTED( "InitNewGame", "Strategic/Game Init.c" );
+	if ( gubScreenCount == 0 )
+	{
+		SetPendingNewScreen( LAPTOP_SCREEN );
+		gubScreenCount = 1;
+		return( TRUE );
+	}
+	if ( gubScreenCount == 1 )
+	{
+		gubScreenCount = 2;
+	}
 	return( TRUE );
 }
 

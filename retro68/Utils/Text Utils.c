@@ -6,6 +6,9 @@
 	#include "Fileman.h"
 	#include "JA2 Demo Ads.h"
 #endif
+#ifdef JA2_PPC
+#include "sgp_endian.h"
+#endif
 
 BOOLEAN LoadItemInfo(UINT16 ubIndex, STR16 pNameString, STR16 pInfoString )
 {
@@ -37,6 +40,10 @@ BOOLEAN LoadItemInfo(UINT16 ubIndex, STR16 pNameString, STR16 pInfoString )
 		FileClose(hFile);
 		return( FALSE );
 	}
+	#ifdef JA2_PPC
+	// JA2 PPC: the text files hold little-endian 16-bit characters.
+	SGPSwapLE16Array( pNameString, SIZE_ITEM_NAME / 2 );
+	#endif
 
 	// Decrement, by 1, any value > 32
 	for(i=0; (i<SIZE_ITEM_NAME) && (pNameString[i] != 0); i++ )
@@ -88,6 +95,10 @@ BOOLEAN LoadItemInfo(UINT16 ubIndex, STR16 pNameString, STR16 pInfoString )
 			FileClose(hFile);
 			return( FALSE );
 		}
+		#ifdef JA2_PPC
+		// JA2 PPC: the text files hold little-endian 16-bit characters.
+		SGPSwapLE16Array( pInfoString, SIZE_ITEM_INFO / 2 );
+		#endif
 
 		// Decrement, by 1, any value > 32
 		for(i=0; (i<SIZE_ITEM_INFO) && (pInfoString[i] != 0); i++ )
@@ -155,6 +166,10 @@ BOOLEAN LoadShortNameItemInfo(UINT16 ubIndex, STR16 pNameString )
 		FileClose(hFile);
 		return( FALSE );
 	}
+	#ifdef JA2_PPC
+	// JA2 PPC: the text files hold little-endian 16-bit characters.
+	SGPSwapLE16Array( pNameString, SIZE_ITEM_NAME / 2 );
+	#endif
 
 	// Decrement, by 1, any value > 32
 	for(i=0; (i<SIZE_ITEM_NAME) && (pNameString[i] != 0); i++ )
