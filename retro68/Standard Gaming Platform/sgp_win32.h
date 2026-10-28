@@ -39,6 +39,11 @@ typedef unsigned char *LPBYTE;
 typedef void *HKEY;
 
 typedef struct {
+    LONG x;
+    LONG y;
+} POINT, *LPPOINT;
+
+typedef struct {
     DWORD dwLowDateTime;
     DWORD dwHighDateTime;
 } FILETIME;
@@ -126,6 +131,25 @@ typedef struct {
 
 #define MB_OK 0
 
+/* The Mac shell hides the system cursor itself (SDL) and owns the only
+   window, so these window calls do nothing. */
+#define ShowCursor( fShow ) ( (void)( fShow ), 0 )
+#define ShowWindow( hWindow, iCommand ) ( (void)( hWindow ), (void)( iCommand ), 0 )
+#define SW_HIDE 0
+#define MB_TASKMODAL 0x00002000L
+#define MB_ICONERROR 0x00000010L
+
+/* The Mac build is single-threaded (no refresh thread), so the Mutex
+   Manager's critical sections are no-ops. */
+typedef struct
+{
+    int iUnused;
+} CRITICAL_SECTION;
+#define InitializeCriticalSection( p ) ( (void)( p ) )
+#define DeleteCriticalSection( p ) ( (void)( p ) )
+#define EnterCriticalSection( p ) ( (void)( p ) )
+#define LeaveCriticalSection( p ) ( (void)( p ) )
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -171,6 +195,10 @@ DWORD FormatMessage(DWORD flags, const void *source, DWORD messageId, DWORD lang
 void OutputDebugString(LPCSTR text);
 int MessageBox(HWND window, LPCSTR text, LPCSTR caption, UINT type);
 DWORD GetTickCount(void);
+/* Mouse position in window coordinates; the shell installs the source. */
+typedef void (*SGPCursorPosProc)(LONG *x, LONG *y);
+extern SGPCursorPosProc gpSGPGetCursorPos;
+BOOL GetCursorPos(LPPOINT point);
 void GlobalMemoryStatus(MEMORYSTATUS *status);
 
 int _stricmp(const char *left, const char *right);

@@ -26,6 +26,9 @@
  *   waitfor <screen> <ms> pause until that screen shows; fail after ms
  *   sgptest              run the Standard Gaming Platform self-test
  *                        (ja2_sgp_selftest.c); each failed check counts
+ *   sgpvideo             run the SGP video self-test (after sgptest): draws
+ *                        a fixed scene through the original blitters and
+ *                        presents it in the window
  *   mark <label>         profiler marker (profile builds) + log line
  *   log <text>           log line
  *   timeout <s>          watchdog, quits with result=timeout (default 600)
@@ -330,6 +333,12 @@ static Boolean RunCommand(char *line)
     }
     if (strcmp(command, "sgptest") == 0) {
         gFailures += (short)JA2SGPSelfTest(AutotestLog);
+        return 0;
+    }
+    if (strcmp(command, "sgpvideo") == 0) {
+        /* No yield: a following "shot" captures the SGP frame before the
+           shell's own screens draw over it. */
+        gFailures += (short)JA2SGPGraphicsSelfTest(AutotestLog);
         return 0;
     }
     if (strcmp(command, "mark") == 0) {

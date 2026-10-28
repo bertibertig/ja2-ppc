@@ -12,4 +12,10 @@ typedef void (*JA2SGPReportProc)(const char *format, ...);
 
 int JA2SGPSelfTest(JA2SGPReportProc report);
 
+/* Video layer: video manager, surfaces, objects and blitters. Draws a
+ * fixed scene into the frame buffer, reports its checksum (compared with
+ * tools/sgp_reference.py) and presents it once through RefreshScreen.
+ * Needs JA2SGPSelfTest's file database (call it first). */
+int JA2SGPGraphicsSelfTest(JA2SGPReportProc report);
+
 #endif

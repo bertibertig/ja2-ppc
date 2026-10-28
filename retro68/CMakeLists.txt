@@ -27,15 +27,33 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SDL2Classic.cmake)
 # changed only behind JA2_PPC, plus the Win32 compatibility layer
 # (sgp_win32.c). See CLAUDE.md "Architecture decision".
 set(JA2_SGP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Standard Gaming Platform")
-set(JA2_SGP_SOURCES
+set(JA2_SGP_PORT_SOURCES
     "${JA2_SGP_DIR}/sgp_win32.c"
+    "${JA2_SGP_DIR}/sgp_ddraw.c"
+    "${JA2_SGP_DIR}/sgp_video_game.c"
+)
+set(JA2_SGP_ORIGINAL_SOURCES
     "${JA2_SGP_DIR}/DEBUG.C"
     "${JA2_SGP_DIR}/Container.c"
     "${JA2_SGP_DIR}/FileMan.c"
     "${JA2_SGP_DIR}/LibraryDataBase.c"
     "${JA2_SGP_DIR}/Random.c"
     "${JA2_SGP_DIR}/timer.c"
+    "${JA2_SGP_DIR}/himage.c"
+    "${JA2_SGP_DIR}/STCI.c"
+    "${JA2_SGP_DIR}/PCX.C"
+    "${JA2_SGP_DIR}/impTGA.c"
+    "${JA2_SGP_DIR}/Compression.c"
+    "${JA2_SGP_DIR}/shading.c"
+    "${JA2_SGP_DIR}/vobject.c"
+    "${JA2_SGP_DIR}/vobject_blitters.c"
+    "${JA2_SGP_DIR}/vsurface.c"
+    "${JA2_SGP_DIR}/video.c"
+    "${JA2_SGP_DIR}/DirectDraw Calls.c"
+    "${JA2_SGP_DIR}/DirectX Common.c"
+    "${JA2_SGP_DIR}/Mutex Manager.c"
 )
+set(JA2_SGP_SOURCES ${JA2_SGP_PORT_SOURCES} ${JA2_SGP_ORIGINAL_SOURCES})
 # The x86 sources spell headers in several cases ("types.h", "DEBUG.H");
 # give each spelling an alias for the case-sensitive host file system.
 set(JA2_CASE_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/case-include")
@@ -48,13 +66,22 @@ if(NOT JA2_CASE_INCLUDE_RESULT EQUAL 0)
     message(FATAL_ERROR "gen_case_includes.py failed")
 endif()
 # Quoted includes only (-iquote), so Mac headers such as <Timer.h> and
-# <Types.h> never resolve to SGP headers of the same name. The original
-# code's own warnings are not fixed in place.
-set_source_files_properties(${JA2_SGP_SOURCES} ja2_sgp_selftest.c PROPERTIES
+# <Types.h> never resolve to SGP headers of the same name. -fcommon: the
+# original defines some globals in headers, which MSVC merged. The original
+# files are compiled without warnings (their code is not fixed in place;
+# several of GCC's complaints about them cannot be turned off one by one);
+# the port's own sgp_*.c and the self-test keep all warnings.
+set(JA2_SGP_COMPILE_OPTIONS "-fcommon;-iquote;${JA2_SGP_DIR};-iquote;${CMAKE_CURRENT_SOURCE_DIR};-iquote;${JA2_CASE_INCLUDE_DIR}")
+set_source_files_properties(${JA2_SGP_PORT_SOURCES} ja2_sgp_selftest.c PROPERTIES
     COMPILE_DEFINITIONS "JA2;JA2_PPC"
-    COMPILE_OPTIONS "-iquote;${JA2_SGP_DIR};-iquote;${CMAKE_CURRENT_SOURCE_DIR};-iquote;${JA2_CASE_INCLUDE_DIR};-Wno-unused-variable;-Wno-unused-but-set-variable;-Wno-multichar;-Wno-format;-Wno-pointer-sign;-Wno-int-to-pointer-cast;-Wno-comment")
-# DEBUG.C keeps its original upper-case name; gcc would treat ".C" as C++.
-set_property(SOURCE "${JA2_SGP_DIR}/DEBUG.C" APPEND PROPERTY COMPILE_OPTIONS "-x;c")
+    COMPILE_OPTIONS "${JA2_SGP_COMPILE_OPTIONS}")
+set_source_files_properties(${JA2_SGP_ORIGINAL_SOURCES} PROPERTIES
+    COMPILE_DEFINITIONS "JA2;JA2_PPC"
+    COMPILE_OPTIONS "${JA2_SGP_COMPILE_OPTIONS};-w")
+# DEBUG.C and PCX.C keep their original upper-case names. CMake skips ".C"
+# in a C-only project and gcc would treat it as C++, so set both.
+set_source_files_properties("${JA2_SGP_DIR}/DEBUG.C" "${JA2_SGP_DIR}/PCX.C" PROPERTIES LANGUAGE C)
+set_property(SOURCE "${JA2_SGP_DIR}/DEBUG.C" "${JA2_SGP_DIR}/PCX.C" APPEND PROPERTY COMPILE_OPTIONS "-x;c")
 
 add_application(JA2PPC
     ja2_autotest.c

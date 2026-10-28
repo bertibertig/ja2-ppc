@@ -1039,6 +1039,21 @@ int MessageBox(HWND window, LPCSTR text, LPCSTR caption, UINT type)
 #endif
 
 /* ------------------------------------------------------------------------
+   Mouse */
+
+SGPCursorPosProc gpSGPGetCursorPos;
+
+BOOL GetCursorPos(LPPOINT point)
+{
+    point->x = 0;
+    point->y = 0;
+    if (gpSGPGetCursorPos) {
+        gpSGPGetCursorPos(&point->x, &point->y);
+    }
+    return TRUE;
+}
+
+/* ------------------------------------------------------------------------
    Process state */
 
 BOOL SetCurrentDirectory(LPCSTR name)

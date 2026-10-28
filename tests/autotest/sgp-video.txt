@@ -1,0 +1,8 @@
+# SGP video layer: file database (sgptest), then a fixed scene drawn with
+# the original video object / surface code and blitters, presented through
+# RefreshScreen. The logged checksum must equal tools/sgp_reference.py.
+timeout 120
+sgptest
+sgpvideo
+shot sgpvideo
+quit

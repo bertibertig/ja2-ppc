@@ -16,6 +16,12 @@
 
 #ifndef JA2_PPC
 #include <crtdbg.h>
+#else
+// JA2 PPC: the shell's log (JA2PPC-Debug.log in debug builds).
+#ifdef __cplusplus
+extern "C"
+#endif
+void DebugLog( const char *format, ... );
 #endif
 
 #include "types.h"

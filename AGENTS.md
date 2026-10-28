@@ -96,6 +96,35 @@ on the new SGP. `ja2-master/` is never edited.
   on the build host against a bundle; the autotest command `sgptest` runs
   the same checks on the Mac (`tests/autotest/sgp.txt`).
 
+### SGP video layer (Phase 2, 2026-10-28)
+
+- Ported: `himage.c`, `STCI.c`, `PCX.C`, `impTGA.c`, `shading.c`,
+  `vobject.c`, `vobject_blitters.c`, `vsurface.c`, `video.c`,
+  `DirectDraw Calls.c`, `Mutex Manager.c` (critical sections are no-ops:
+  single-threaded), `Compression.c` (stub: no STI in the data uses zlib).
+- `sgp_ddraw.h/.c`: software DirectDraw. Surfaces are memory buffers
+  (RGB555 for 16 bpp); `IDirectDraw*` methods are C functions with
+  DirectDraw semantics. `gfDontUseDDBlits` stays FALSE as on Windows (the
+  original's software fallback fills rectangles one pixel larger). The
+  primary surface is a real flip chain; `Flip` swaps the buffers and hands
+  the new front buffer to `gpSGPDDPresent`, which the shell (ja2_mac.c)
+  draws into the SDL window. `video.c`'s RefreshScreen (dirty regions,
+  mouse buffer, restore after flip) is the original full-screen path.
+- Blitters: every x86 `__asm` block in `vobject_blitters.c` is wrapped in
+  `#ifdef JA2_PPC`. The C versions use the macros in `sgp_blit_c.h`, which
+  follow the assembly's control flow exactly (incl. its clipping quirks).
+  Ported so far: the 2D set (transparent, shadow, trans-shadow, mono
+  shadow, outline, mirror, half, 16-bit copies, fills, shadow rects). The
+  Z-buffer/tactical and 8-bit-destination blitters log
+  `SGP: blitter X is not ported yet` and return FALSE until Phase 4.
+- `sgp_video_game.c` holds idle stand-ins (initial values) for the game
+  globals video.c reads (scrolling, fades, viewport); remove each when its
+  original module is ported.
+- Verification: `tools/sgp_reference.py` decodes the same STIs from the
+  SLF archives in Python and must give the checksum the video self-test
+  reports (`tests/autotest/sgp-video.txt`, autotest command `sgpvideo`);
+  host, reference and PowerBook all give `63ebf31d`.
+
 ## Original Source Requirement
 
 Before implementing, translating, or modifying any feature, always reference

@@ -25,6 +25,16 @@ void SGPSrand(unsigned int seed);
 #define rand SGPRand
 #define srand SGPSrand
 
+/* MSVC's min/max helpers. */
+#ifndef __min
+#define __min( a, b ) ( ( a ) < ( b ) ? ( a ) : ( b ) )
+#define __max( a, b ) ( ( a ) > ( b ) ? ( a ) : ( b ) )
+#endif
+#ifndef min
+#define min( a, b ) __min( a, b )
+#define max( a, b ) __max( a, b )
+#endif
+
 int _stricmp(const char *left, const char *right);
 int _strnicmp(const char *left, const char *right, size_t count);
 char *_strupr(char *text);

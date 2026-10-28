@@ -1275,6 +1275,40 @@ void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
     RecordPresentedFrame();
 }
 
+/* SGP globals (sgp_ddraw.h, sgp_win32.h); declared here because the shell
+   does not include the SGP headers (their Types.h etc. would clash). */
+extern void (*gpSGPDDPresent)(const unsigned short *pixels, unsigned int pitch,
+                              unsigned int width, unsigned int height);
+extern void (*gpSGPGetCursorPos)(int *x, int *y);
+
+/* Hooks for the ported Standard Gaming Platform: its software DirectDraw
+   hands every flipped primary surface (RGB555) to the window, and its
+   GetCursorPos reads the SDL mouse. */
+static void JA2SGPPresent(const Uint16 *pixels, unsigned int pitch,
+                          unsigned int width, unsigned int height)
+{
+    SDL_Surface *frame = SDL_CreateRGBSurfaceWithFormatFrom((void *)pixels, (int)width,
+        (int)height, 16, (int)pitch, SDL_PIXELFORMAT_RGB555);
+
+    if (frame == NULL) {
+        DebugLog("SGP present: cannot wrap primary surface: %s", SDL_GetError());
+        return;
+    }
+    JA2BlitSurfaceToWindow(frame, "SGP primary surface");
+    SDL_FreeSurface(frame);
+}
+
+static void JA2SGPCursorPos(int *x, int *y)
+{
+    JA2AutotestGetMouseState(x, y);
+}
+
+void JA2InstallSGPHooks(void)
+{
+    gpSGPDDPresent = JA2SGPPresent;
+    gpSGPGetCursorPos = JA2SGPCursorPos;
+}
+
 void JA2PresentWindowSurface(const char *name)
 {
     if (gWindow == NULL) {
@@ -2045,6 +2079,7 @@ int main(int argc, char *argv[])
     DebugLog("JA2 PPC startup (SDL2 rendering backend)");
     JA2OptionsLoad();
     JA2ProfInit();
+    JA2InstallSGPHooks();
     JA2AutotestInit();
     JA2MenuMusicSetLogger(DebugLog);
     DebugLog("Language: %s",

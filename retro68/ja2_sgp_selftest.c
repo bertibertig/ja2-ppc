@@ -6,6 +6,9 @@
 #include "Container.h"
 #include "random.h"
 #include "timer.h"
+#include "video.h"
+#include "vsurface.h"
+#include "vobject.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -160,7 +163,84 @@ int JA2SGPSelfTest(JA2SGPReportProc report)
         ShutdownContainers();
     }
 
-    ShutDownFileDatabase();
     report("result sgp failures=%d", failures);
+    return failures;
+}
+
+static UINT32 FrameBufferChecksum(void)
+{
+    UINT32 uiPitch;
+    UINT8 *pBuffer = (UINT8 *)LockFrameBuffer(&uiPitch);
+    UINT32 uiHash = 2166136261UL;
+    UINT32 uiRow;
+    UINT32 uiCol;
+
+    for (uiRow = 0; uiRow < 480; ++uiRow) {
+        UINT16 *pLine = (UINT16 *)(pBuffer + uiRow * uiPitch);
+
+        for (uiCol = 0; uiCol < 640; ++uiCol) {
+            uiHash = (uiHash ^ (pLine[uiCol] >> 8)) * 16777619UL;
+            uiHash = (uiHash ^ (pLine[uiCol] & 0xff)) * 16777619UL;
+        }
+    }
+    UnlockFrameBuffer();
+    return uiHash;
+}
+
+static BOOLEAN LoadObject(const char *pFile, UINT32 *puiObject)
+{
+    VOBJECT_DESC VObjectDesc;
+
+    memset(&VObjectDesc, 0, sizeof(VObjectDesc));
+    VObjectDesc.fCreateFlags = VOBJECT_CREATE_FROMFILE;
+    strcpy(VObjectDesc.ImageFile, pFile);
+    return AddVideoObject(&VObjectDesc, puiObject);
+}
+
+int JA2SGPGraphicsSelfTest(JA2SGPReportProc report)
+{
+    int failures = 0;
+    UINT32 uiBackground = 0;
+    UINT32 uiHelp = 0;
+    UINT32 uiRedMask = 0;
+    UINT32 uiGreenMask = 0;
+    UINT32 uiBlueMask = 0;
+    HVOBJECT hObject;
+    UINT32 uiChecksum;
+
+    CHECK(InitializeVideoManager(NULL, 0, NULL), "InitializeVideoManager");
+    GetPrimaryRGBDistributionMasks(&uiRedMask, &uiGreenMask, &uiBlueMask);
+    CHECK(uiRedMask == 0x7C00 && uiGreenMask == 0x03E0 && uiBlueMask == 0x001F,
+          "RGB555 distribution %04lx/%04lx/%04lx", (unsigned long)uiRedMask,
+          (unsigned long)uiGreenMask, (unsigned long)uiBlueMask);
+    CHECK(InitializeVideoSurfaceManager(), "InitializeVideoSurfaceManager");
+    CHECK(InitializeVideoObjectManager(), "InitializeVideoObjectManager");
+
+    CHECK(LoadObject("LOADSCREENS\\MAINMENUBACKGROUND.STI", &uiBackground),
+          "AddVideoObject MAINMENUBACKGROUND.STI");
+    CHECK(GetVideoObject(&hObject, uiBackground) && hObject->pETRLEObject[0].usWidth == 640 &&
+          hObject->pETRLEObject[0].usHeight == 480, "video object is 640x480");
+    CHECK(LoadObject("INTERFACE\\HelpScreen.sti", &uiHelp), "AddVideoObject HelpScreen.sti");
+
+    /* The scene: background, two help screen pieces, one of them hanging
+       over the right edge (clipped blitter), and a filled rectangle. */
+    CHECK(BltVideoObjectFromIndex(FRAME_BUFFER, uiBackground, 0, 0, 0, VO_BLT_SRCTRANSPARENCY, NULL),
+          "blit background");
+    CHECK(BltVideoObjectFromIndex(FRAME_BUFFER, uiHelp, 8, 100, 60, VO_BLT_SRCTRANSPARENCY, NULL),
+          "blit HelpScreen 8");
+    CHECK(BltVideoObjectFromIndex(FRAME_BUFFER, uiHelp, 9, 560, 300, VO_BLT_SRCTRANSPARENCY, NULL),
+          "blit HelpScreen 9 clipped at the right edge");
+    CHECK(ColorFillVideoSurfaceArea(FRAME_BUFFER, 20, 400, 120, 440, Get16BPPColor(FROMRGB(255, 0, 0))),
+          "ColorFillVideoSurfaceArea");
+    uiChecksum = FrameBufferChecksum();
+    report("info frame buffer checksum %08lx", (unsigned long)uiChecksum);
+
+    InvalidateScreen();
+    RefreshScreen(NULL);
+    report("ok   RefreshScreen presented the frame");
+
+    DeleteVideoObjectFromIndex(uiHelp);
+    DeleteVideoObjectFromIndex(uiBackground);
+    report("result sgp-video failures=%d checksum=%08lx", failures, (unsigned long)uiChecksum);
     return failures;
 }
