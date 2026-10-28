@@ -59,6 +59,11 @@ set(SDL2_CLASSIC_CURSOR_DEVICES_GLUE
 # calls the SDL_GL_* API per AGENTS.md's "Rendering Backend (SDL2)" policy.
 set(SDL2_CLASSIC_CPPFLAGS
     "-I./include -D__MACOSCLASSIC__ -DMAC_DEBUG=1")
+# Since upstream ecad0d6 the fork puts the Sprocket defines into its default
+# CFLAGS ("?="), so CFLAGS is pinned here as well. These are the fork's
+# previous defaults; note they build SDL without optimization (-O0), which
+# is a profiling candidate (see the ja2-profile skill).
+set(SDL2_CLASSIC_CFLAGS "-g -Wall -Wshadow -Wno-unused-variable")
 
 # BUILDING_FOR_PRE9 is required for the OS 8.6-9.2.2 target range (AGENTS.md
 # "Toolchain And Target Platform"); it is added once the pre-9 code paths
@@ -75,6 +80,7 @@ ExternalProject_Add(JA2PPC_SDL2
         AR=powerpc-apple-macos-ar
         RANLIB=powerpc-apple-macos-ranlib
         CPPFLAGS=${SDL2_CLASSIC_CPPFLAGS}
+        CFLAGS=${SDL2_CLASSIC_CFLAGS}
         CURSOR_DEVICES_GLUE=${SDL2_CLASSIC_CURSOR_DEVICES_GLUE}
     BUILD_BYPRODUCTS "${SDL2_CLASSIC_LIBRARY}" "${SDL2_CLASSIC_MAIN_LIBRARY}"
     INSTALL_COMMAND ""
