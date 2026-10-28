@@ -1,0 +1,23 @@
+# Profiler scene: main menu, idle 10 s, then hover over the five buttons.
+# Run with: --set profile_uncapped=1 --set skip_intros=1 --set show_fps=0
+#           --set profile_label=menu   (profile_frames stays 0)
+timeout 300
+wait 6000
+expect main
+mark menu_idle
+wait 10000
+mark menu_hover
+move 320 290
+wait 500
+move 320 327
+wait 500
+move 320 364
+wait 500
+move 320 400
+wait 500
+move 320 437
+wait 500
+move 600 100
+wait 500
+expect main
+quit

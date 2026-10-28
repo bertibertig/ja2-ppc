@@ -123,8 +123,13 @@ copy_tree() {
     done
 }
 
+# Screenshots written by an autotest script (<name>.bmp beside the app).
+guest_shots() {
+    hfs hls -1 "$1" 2>/dev/null | grep -i '\.bmp$' || true
+}
+
 deploy() {
-    local bundle="$BUILD_DIR/JA2PPC Bundle" folder
+    local bundle="$BUILD_DIR/JA2PPC Bundle" folder options script file
     [[ -f "$WORK_IMAGE" ]] || die "run '$0 prepare' first"
     [[ -f "$BUILD_DIR/JA2PPC.bin" ]] || die "missing $BUILD_DIR/JA2PPC.bin; build first"
     [[ -d "$bundle/Data" ]] || die "missing $bundle/Data; configure with JA2_DATA_DIR"
@@ -132,9 +137,23 @@ deploy() {
     trap unmount_work EXIT
     folder=$(startup_folder)
     hfs hdel "$folder:JA2PPC" "$folder:JA2PPC-Debug.log" "$folder:JA2PROF.csv" \
-        "$folder:options.cfg" 2>/dev/null || true
+        "$folder:JA2AUTOTEST.log" "$folder:options.cfg" 2>/dev/null || true
+    for file in $(guest_shots "$folder"); do
+        hfs hdel "$folder:$file" 2>/dev/null || true
+    done
     hfs hcopy -m "$BUILD_DIR/JA2PPC.bin" "$folder:JA2PPC"
-    hfs hcopy -r "${EMU_OPTIONS:-$bundle/options.cfg}" "$folder:options.cfg"
+    options="${EMU_OPTIONS:-$bundle/options.cfg}"
+    if [[ -n "${EMU_AUTOTEST:-}" ]]; then
+        # Same scripts as tools/machw.py autotest on the PowerBook.
+        script=$(basename -- "$EMU_AUTOTEST")
+        hfs hdel "$folder:$script" 2>/dev/null || true
+        hfs hcopy -r "$EMU_AUTOTEST" "$folder:$script"
+        mkdir -p "$WORK_DIR/tmp"
+        { grep -v '^autotest=' "$options"; printf 'autotest=%s\n' "$script"; } \
+            >"$WORK_DIR/tmp/options.cfg"
+        options="$WORK_DIR/tmp/options.cfg"
+    fi
+    hfs hcopy -r "$options" "$folder:options.cfg"
     hfs hcopy -r "$bundle/Ja2.ini" "$folder:Ja2.ini" 2>/dev/null || \
         { hfs hdel "$folder:Ja2.ini"; hfs hcopy -r "$bundle/Ja2.ini" "$folder:Ja2.ini"; }
     if [[ ! -f "$DATA_STAMP" || "$bundle/.bundle-complete" -nt "$DATA_STAMP" ]]; then
@@ -143,6 +162,11 @@ deploy() {
         copy_tree "$bundle/Data" "$folder:Data"
         touch "$DATA_STAMP"
     fi
+    # The Finder opens every visible item in Startup Items at boot (text
+    # files in SimpleText, folders as windows); only the app may stay visible.
+    for file in options.cfg Ja2.ini Data ${script:+"$script"}; do
+        hfs hattrib +i "$folder:$file" 2>/dev/null || true
+    done
     unmount_work
     trap - EXIT
     printf 'deployed %s into %s%s\n' "$BUILD_DIR/JA2PPC.bin" "$WORK_IMAGE" "$folder"
@@ -257,15 +281,23 @@ collect() {
     mount_work
     trap unmount_work EXIT
     folder=$(startup_folder)
-    for file in JA2PPC-Debug.log JA2PROF.csv; do
+    for file in JA2PPC-Debug.log JA2PROF.csv JA2AUTOTEST.log; do
         if hfs hcopy -r "$folder:$file" "$OUT_DIR/$file" 2>/dev/null; then
             printf 'collected %s\n' "$OUT_DIR/$file"
         fi
+    done
+    for file in $(guest_shots "$folder"); do
+        hfs hcopy -r "$folder:$file" "$OUT_DIR/$file" &&
+            ffmpeg -loglevel error -y -i "$OUT_DIR/$file" "$OUT_DIR/${file%.*}.png" &&
+            rm -f "$OUT_DIR/$file" && printf 'collected %s\n' "$OUT_DIR/${file%.*}.png"
     done
     unmount_work
     trap - EXIT
     [[ -f "$OUT_DIR/JA2PPC-Debug.log" ]] || \
         printf 'no JA2PPC-Debug.log: the game did not start or did not get that far\n'
+    if [[ -f "$OUT_DIR/JA2AUTOTEST.log" ]]; then
+        tr '\r' '\n' <"$OUT_DIR/JA2AUTOTEST.log" | tail -n 1
+    fi
 }
 
 case "${1:-all}" in

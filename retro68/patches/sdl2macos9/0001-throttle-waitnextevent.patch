@@ -1,0 +1,38 @@
+--- a/SDL-main/src/video/macosclassic/macevents.c	2026-10-28 15:57:27.324067475 +0100
++++ b/SDL-main/src/video/macosclassic/macevents.c	2026-10-28 15:57:27.335044258 +0100
+@@ -48,6 +48,9 @@
+ static AEEventHandlerUPP mac_document_handler;
+ static AEEventHandlerUPP mac_quit_app_handler;
+ static int mac_apple_events_ready;
++/* Tick of the last WaitNextEvent call (JA2 PPC patch, see pumpEvents). */
++static unsigned long mac_last_wne_ticks;
++static int mac_wne_called;
+ 
+ void Mac_ResetMouseTracking(void)
+ {
+@@ -390,8 +393,23 @@
+ #endif
+ 
+   /* WaitNextEvent both retrieves the next Toolbox event and yields time to
+-     other cooperative processes when the queue is empty. */
+-  got_event = WaitNextEvent(everyEvent & ~autoKeyMask, &event, 1, NULL);
++     other cooperative processes. JA2 PPC patch: with a sleep of 1 tick an
++     empty queue blocked every poll for a full tick (16.7 ms per frame on a
++     PowerBook G3), and SDL polls several times per frame. Yield with a
++     sleep of 0 at most every 2 ticks; in between take only low-level
++     mouse/key events, which does not hand the CPU to other processes. */
++  {
++    unsigned long now = TickCount();
++
++    if (!mac_wne_called || now - mac_last_wne_ticks >= 2) {
++      mac_wne_called = 1;
++      mac_last_wne_ticks = now;
++      got_event = WaitNextEvent(everyEvent & ~autoKeyMask, &event, 0, NULL);
++    } else {
++      got_event = GetOSEvent(mDownMask | mUpMask | keyDownMask | keyUpMask,
++                             &event);
++    }
++  }
+   if (got_event) {
+     etype=event.what;
+     switch(etype) {

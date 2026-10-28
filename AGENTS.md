@@ -187,10 +187,15 @@ How the PPC target maps onto them (decided 2026-10-28):
   game. The DingusPPC reference machine uses 2 MB, the smallest it emulates.
 - Disk: the port copies the complete `Data/` tree (about 930 MB) instead of
   running parts from CD.
-- Reaching this target needs the planned performance work: on the G3/333
-  test machine the main menu ran at 15.8 fps (2026-10-28), dominated by the
-  SDL event pump, and a 604/120 is roughly 3-4x slower. The SDL fork is
-  still built with `-O0` (`retro68/cmake/SDL2Classic.cmake`).
+- Reaching this target needs the planned performance work. On the G3/333
+  test machine the main menu first ran at 15.8 fps (2026-10-28) because the
+  SDL fork's `WaitNextEvent(..., sleep=1)` blocked a full tick per poll; the
+  port-local patch in `retro68/patches/sdl2macos9/` cut the event pump from
+  ~50 ms to 0.04 ms per frame. The remaining per-frame cost is the full
+  640x480 present (RGB555 blit 11-21 ms + `SDL_UpdateWindowSurface` 19-37 ms
+  on the G3), which a 604/120 makes roughly 3-4x slower: present only dirty
+  rectangles there. The SDL fork is built with `-O2` and without its
+  `MAC_DEBUG` stderr tracing (`retro68/cmake/SDL2Classic.cmake`).
 
 The following QuickDraw-level guidance applies to the SDL2 backend fork's
 internals and to the Movie Toolbox GWorld interop in `Cinematics.c`, not to

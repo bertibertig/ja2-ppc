@@ -35,7 +35,10 @@ description: Measure JA2 PPC performance on the real Mac OS 9 PowerBook with the
 ## Options (`options.cfg` beside the app)
 
 ```
-profile_frames=600     # quit cleanly after N frames (0 = until user quits)
+profile_frames=600     # quit cleanly after N frames (0 = until user quits).
+                       # Uncapped idle frames now take ~0.1 ms, so prefer
+                       # profile_frames=0 with an autotest script that sets
+                       # the scene and quits (tests/autotest/menu-idle.txt)
 profile_uncapped=1     # drop the 16 ms SDL_Delay to measure max throughput
 profile_label=menu     # tag stored in the CSV
 skip_intros=1          # for menu/laptop scenes
@@ -48,6 +51,10 @@ skip_intros=1          # for menu/laptop scenes
    -DJA2_DEBUG_BUILD=ON -DJA2_PROFILE=ON && cmake --build retro68/build-profile`
 2. Upload `options.cfg` with the scene's settings; delete `/JA2PROF.csv`
    and `/JA2PPC-Debug.log` on the Mac (see `mac-hw-test`).
+   Shortcut for steps 2-4: `python3 tools/machw.py autotest
+   tests/autotest/menu-idle.txt --build retro68/build-profile --out
+   .hw-out/<scene> --set profile_uncapped=1 --set skip_intros=1
+   --set show_fps=0 --set profile_label=<scene>`.
 3. `execute_binary` with `retro68/build-profile/JA2PPC.bin`. With
    `profile_frames` set the app exits by itself and writes the CSV.
 4. `download_file` `/JA2PROF.csv` → scratchpad, then

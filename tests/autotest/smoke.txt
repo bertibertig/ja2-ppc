@@ -1,6 +1,6 @@
 # Shell smoke test: logo -> main menu -> credits -> back -> difficulty -> back.
 # Run: tools/machw.py autotest tests/autotest/smoke.txt --set skip_intros=1
-timeout 180
+timeout 600
 wait 6000
 expect main
 shot menu

@@ -18,6 +18,19 @@ rebuild with universal interfaces); the toolchain file is
 older fallback toolchain is noted in `local.env`. A build dir is bound to the toolchain it was configured with;
 switching toolchain means a fresh build dir (or delete `CMakeCache.txt`).
 
+The current toolchain is Retro68 `0cbd3cb` (upstream head as of
+2026-10-28) with GCC 16.1. Updating it: `git -C ~/Retro68 pull`, then in
+the toolchain's build dir run `../Retro68/build-toolchain.bash --universal
+--ninja` (add `--skip-thirdparty` when only Retro68's own tools changed;
+needs the `boost` package). Rebuild JA2 in fresh build dirs afterwards.
+
+SDL2 (`retro68/third_party/sdl2macos9`, submodule) is copied into each
+build dir (`<build>/sdl2macos9`) and built there with `-O2`, so build dirs
+never share SDL objects. Port-local fixes to the fork live as patches in
+`retro68/patches/sdl2macos9/` and are applied to that copy on every build;
+never edit the submodule. `-DJA2_SDL2_DEBUG=ON` re-enables the fork's
+`MAC_DEBUG` stderr tracing (slow: file I/O on every event poll).
+
 Data: `$JA2_DATA_DIR` from `local.env` (needs `Ja2.ini` + `Data/`).
 
 ## Configurations

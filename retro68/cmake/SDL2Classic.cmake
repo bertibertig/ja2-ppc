@@ -19,8 +19,19 @@ include(ExternalProject)
 set(SDL2_CLASSIC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl2macos9")
 set(SDL2_CLASSIC_SRC_DIR "${SDL2_CLASSIC_ROOT}/SDL-main")
 set(SDL2_CLASSIC_INCLUDE_DIR "${SDL2_CLASSIC_SRC_DIR}/include")
-set(SDL2_CLASSIC_LIBRARY "${SDL2_CLASSIC_SRC_DIR}/libSDL2.a")
-set(SDL2_CLASSIC_MAIN_LIBRARY "${SDL2_CLASSIC_SRC_DIR}/libSDL2main.a")
+# The fork's Makefile builds in its own tree. Each JA2 build dir gets its
+# own copy of the sources (objects excluded), so build dirs with different
+# toolchains or flags never share objects or libraries.
+set(SDL2_CLASSIC_BUILD_ROOT "${CMAKE_BINARY_DIR}/sdl2macos9")
+set(SDL2_CLASSIC_BUILD_DIR "${SDL2_CLASSIC_BUILD_ROOT}/SDL-main")
+set(SDL2_CLASSIC_LIBRARY "${SDL2_CLASSIC_BUILD_DIR}/libSDL2.a")
+set(SDL2_CLASSIC_MAIN_LIBRARY "${SDL2_CLASSIC_BUILD_DIR}/libSDL2main.a")
+# Port-local fixes to the fork, applied to the copy after every sync (rsync
+# restores the pristine files first). Keep them small; see the patch headers.
+set(SDL2_CLASSIC_PATCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/patches/sdl2macos9")
+# ExternalProject requires an existing, non-empty SOURCE_DIR at configure time.
+file(MAKE_DIRECTORY "${SDL2_CLASSIC_BUILD_ROOT}")
+file(TOUCH "${SDL2_CLASSIC_BUILD_ROOT}/.ja2-sdl-copy")
 
 if(NOT EXISTS "${SDL2_CLASSIC_SRC_DIR}/Makefile.r68ppc")
     message(FATAL_ERROR
@@ -57,13 +68,19 @@ set(SDL2_CLASSIC_CURSOR_DEVICES_GLUE
 # SDL2::Classic must therefore also compile retro68/sdl2_gl_stub.c, which
 # provides no-op stand-ins for exactly those hookup functions; JA2 never
 # calls the SDL_GL_* API per AGENTS.md's "Rendering Backend (SDL2)" policy.
-set(SDL2_CLASSIC_CPPFLAGS
-    "-I./include -D__MACOSCLASSIC__ -DMAC_DEBUG=1")
+#
+# MAC_DEBUG makes the fork write a line to stderr (a file on the Mac) and
+# flush it on every event poll and window call; on the PowerBook that cost
+# most of each frame. JA2_SDL2_DEBUG turns it back on for backend debugging.
+option(JA2_SDL2_DEBUG "Build the SDL2 fork with its MAC_DEBUG stderr tracing" OFF)
+set(SDL2_CLASSIC_CPPFLAGS "-I./include -D__MACOSCLASSIC__")
+if(JA2_SDL2_DEBUG)
+    string(APPEND SDL2_CLASSIC_CPPFLAGS " -DMAC_DEBUG=1")
+endif()
 # Since upstream ecad0d6 the fork puts the Sprocket defines into its default
-# CFLAGS ("?="), so CFLAGS is pinned here as well. These are the fork's
-# previous defaults; note they build SDL without optimization (-O0), which
-# is a profiling candidate (see the ja2-profile skill).
-set(SDL2_CLASSIC_CFLAGS "-g -Wall -Wshadow -Wno-unused-variable")
+# CFLAGS ("?="), so CFLAGS is pinned here as well: the fork's previous
+# defaults plus -O2 (the fork's own default builds without optimization).
+set(SDL2_CLASSIC_CFLAGS "-O2 -g -Wall -Wshadow -Wno-unused-variable")
 
 # BUILDING_FOR_PRE9 is required for the OS 8.6-9.2.2 target range (AGENTS.md
 # "Toolchain And Target Platform"); it is added once the pre-9 code paths
@@ -72,10 +89,16 @@ set(SDL2_CLASSIC_CFLAGS "-g -Wall -Wshadow -Wno-unused-variable")
 # integration can be validated first.
 
 ExternalProject_Add(JA2PPC_SDL2
-    SOURCE_DIR "${SDL2_CLASSIC_ROOT}"
+    SOURCE_DIR "${SDL2_CLASSIC_BUILD_ROOT}"
     BUILD_IN_SOURCE 1
+    BUILD_ALWAYS 1
     CONFIGURE_COMMAND ""
-    BUILD_COMMAND ${JA2_MAKE_EXECUTABLE} -C SDL-main -f Makefile.r68ppc
+    # rsync keeps timestamps, so make only rebuilds what changed upstream.
+    BUILD_COMMAND rsync -a --delete --exclude=*.o --exclude=*.a --exclude=*.d
+            --exclude=.git "${SDL2_CLASSIC_ROOT}/" "${SDL2_CLASSIC_BUILD_ROOT}/"
+        COMMAND ${CMAKE_COMMAND} -DPATCH_DIR=${SDL2_CLASSIC_PATCH_DIR}
+            -P ${CMAKE_CURRENT_LIST_DIR}/ApplyPatches.cmake
+        COMMAND ${JA2_MAKE_EXECUTABLE} -C SDL-main -f Makefile.r68ppc
         CC=${CMAKE_C_COMPILER}
         AR=powerpc-apple-macos-ar
         RANLIB=powerpc-apple-macos-ranlib

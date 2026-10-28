@@ -14,8 +14,16 @@ description: Run a JA2 PPC build headlessly in a Mac OS 8.6/9 emulator (QEMU mac
    (`Startobjekte` on German systems), so the game launches after boot.
    `Data/` is copied only when the bundle changed.
 3. `run` boots for `EMU_TIMEOUT` seconds (default 240), then stops the emulator.
-4. `collect` copies `JA2PPC-Debug.log` and `JA2PROF.csv` to `.emu-out/`.
-   No log means the game never started (or the OS never finished booting).
+4. `collect` copies `JA2PPC-Debug.log`, `JA2PROF.csv`, `JA2AUTOTEST.log`
+   and autotest screenshots (as PNG) to `.emu-out/`. No log means the game
+   never started (or the OS never finished booting).
+
+Scripted runs: `EMU_AUTOTEST=tests/autotest/smoke.txt` deploys the same
+autotest script as `tools/machw.py` on the PowerBook and adds
+`autotest=<script>` to the options; `collect` prints the `result=` line.
+The emulator still runs until `EMU_TIMEOUT`. Deploy marks everything except
+the app invisible, because the Finder opens every visible Startup Items
+entry at boot (SimpleText error dialogs, Finder windows).
 
 Paths (`EMU_WORK_DIR`, `EMU_INSTALL_CD`, `DINGUS_ROOT`, `RETRO68_TOOLCHAIN`)
 come from the git-ignored `local.env` (see `local.env.example`).
@@ -60,6 +68,10 @@ The pm8500 opens a second window for its AV video card; the default
 `AppleVision1710` monitor only offers 640x480.
 
 ## Rules
+
+- Which emulator when: QEMU (9.2.2) for everyday smoke tests. DingusPPC
+  (8.6 on the 7600/120) is slow and only required before a release (and
+  when touching version-gated 8.6 code paths), not for every change.
 
 - An emulator pass is a smoke test only. Acceptance and every performance
   number come from the PowerBook G3 (`mac-hw-test`, `ja2-profile`).
