@@ -9,5 +9,6 @@ Boolean JA2OptionsShowFPS(void);
 unsigned long JA2OptionsProfileFrames(void);
 Boolean JA2OptionsProfileUncapped(void);
 const char *JA2OptionsProfileLabel(void);
+const char *JA2OptionsAutotestScript(void);
 
 #endif

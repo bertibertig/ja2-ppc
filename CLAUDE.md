@@ -34,4 +34,7 @@ the ~270k lines of original game code, so the port moves to this model:
 - MCP `classic-mac-hardware` (`.mcp.json`) deploys to the real PowerBook G3
   Lombard (Mac OS 9.2.2). Emulators are for functional smoke tests only;
   every feature and every performance number is accepted on the real Mac.
+- Unattended hardware tests: `tools/machw.py autotest tests/autotest/<x>.txt`
+  replays a script inside the app (`retro68/ja2_autotest.c`) and collects
+  logs and screenshots; prefer it over asking the user to click on the Mac.
 - Commit author email: sascha.bertleff@proton.me (set in the repo config).

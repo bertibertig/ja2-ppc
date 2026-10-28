@@ -27,6 +27,7 @@
 #include "ja2_slf.h"
 #include "ja2_mac_internal.h"
 #include "ja2_game_init_options.h"
+#include "ja2_autotest.h"
 #include "ja2_options.h"
 #include "ja2_prof.h"
 #include "ja2_ppc_text.h"
@@ -1142,7 +1143,7 @@ static void DrawCursorOverlay(SDL_Surface *destination)
         gMenuScreen == MENU_SCREEN_INTRO) {
         return;
     }
-    SDL_GetMouseState(&mouseX, &mouseY);
+    JA2AutotestGetMouseState(&mouseX, &mouseY);
     sourceX = mouseX < 0 ? -mouseX : 0;
     sourceY = mouseY < 0 ? -mouseY : 0;
     width = gCursorWidth - sourceX;
@@ -1269,7 +1270,7 @@ void JA2BlitSurfaceToWindow(SDL_Surface *surface, const char *name)
         return;
     }
     JA2_PROF_END(JA2_PROF_PRESENT);
-    SDL_GetMouseState(&gLastMouseX, &gLastMouseY);
+    JA2AutotestGetMouseState(&gLastMouseX, &gLastMouseY);
     gMouseMotionNeedsPresent = 0;
     gScreenNeedsPresent = 0;
     RecordPresentedFrame();
@@ -1707,7 +1708,7 @@ static void PollCredits(void)
             return;
         }
     }
-    SDL_GetMouseState(&mouseX, &mouseY);
+    JA2AutotestGetMouseState(&mouseX, &mouseY);
     face = -1;
     for (face = 0; face < 15; ++face) {
         if (mouseX >= gCreditFaces[face].x && mouseX < gCreditFaces[face].x + gCreditFaces[face].width &&
@@ -1899,7 +1900,7 @@ static void UpdateMainMenuHover(void)
     if (gStartupActive || gMenuScreen != MENU_SCREEN_MAIN || !gMenuBackgroundLoaded) {
         return;
     }
-    SDL_GetMouseState(&mouseX, &mouseY);
+    JA2AutotestGetMouseState(&mouseX, &mouseY);
     hoverButton = GetMainMenuButtonAt(mouseX, mouseY);
     if (hoverButton != gMenuHoverButton) {
         previousButton = gMenuHoverButton;
@@ -2057,7 +2058,7 @@ static void UpdateCursorPresentIfMoved(void)
         gMouseMotionNeedsPresent = 0;
         return;
     }
-    SDL_GetMouseState(&mouseX, &mouseY);
+    JA2AutotestGetMouseState(&mouseX, &mouseY);
     if (gScreenNeedsPresent || gMouseMotionNeedsPresent ||
         mouseX != gLastMouseX || mouseY != gLastMouseY) {
         gLastMouseX = mouseX;
@@ -2078,6 +2079,7 @@ int main(int argc, char *argv[])
     DebugLog("JA2 PPC startup (SDL2 rendering backend)");
     JA2OptionsLoad();
     JA2ProfInit();
+    JA2AutotestInit();
     JA2MenuMusicSetLogger(DebugLog);
     DebugLog("Language: %s",
 #if defined(JA2_LANGUAGE_GERMAN)
@@ -2121,6 +2123,7 @@ int main(int argc, char *argv[])
         SDL_Event event;
 
         JA2ProfFrameBegin();
+        JA2AutotestFrame();
         JA2_PROF_BEGIN(JA2_PROF_EVENTS);
         while (SDL_PollEvent(&event)) {
             HandleJA2Event(&event);
@@ -2156,7 +2159,11 @@ int main(int argc, char *argv[])
             DebugLog("Profiler: frame limit reached; quitting");
             gRunning = 0;
         }
+        if (JA2AutotestShouldQuit()) {
+            gRunning = 0;
+        }
     }
+    JA2AutotestShutdown();
     JA2ProfShutdown();
 
     if (gMenuSurface != NULL) {

@@ -21,6 +21,34 @@ If it does not answer, stop and tell the user the PowerBook must be switched
 on with RumpusFTP and LaunchAPPLServer running. Do not fall back to an
 emulator for acceptance.
 
+## Fast path: scripted autotest (preferred)
+
+Interactive steps (clicks, keys, screen checks) are scripted instead of
+asking the user to operate the Mac. `tools/machw.py` talks to the same MCP
+server over stdio (works even when the MCP tools are not loaded in the
+session) and does steps 1-4 below in one command:
+
+```sh
+python3 tools/machw.py autotest tests/autotest/smoke.txt \
+  --build retro68/build-german-debug --set skip_intros=1 [--capture 75]
+```
+
+- The script format is documented at the top of `retro68/ja2_autotest.c`
+  (`wait`, `frames`, `move`, `click`, `key`, `shot`, `expect`, `mark`,
+  `log`, `timeout`, `quit`). Coordinates are 640x480 window coordinates.
+- Outputs land in `.hw-out/`: `JA2AUTOTEST.log` (with `result=pass|...`),
+  `JA2PPC-Debug.log`, `JA2PROF.csv` (profile builds), one PNG per `shot`
+  (exact window surface, including the game cursor), `capture.mp4`.
+- Exit code 0 only on `result=pass`. Afterwards the bundle's normal
+  `options.cfg` is restored on the Mac, so a manual start is not scripted.
+- Keep reusable scripts in `tests/autotest/`; write a new one per feature
+  and commit it with the feature. Read the PNGs before reporting.
+- `python3 tools/machw.py call TOOL '{json}'` issues raw MCP calls
+  (e.g. `list_directory '{"machine":"powerbook-g3","path":"/"}'`).
+
+Only ask the user to operate the Mac for things outside the app (control
+panels, Finder dialogs, hardware).
+
 ## 1. Connection
 
 1. `list_machines`

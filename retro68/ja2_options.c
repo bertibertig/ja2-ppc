@@ -12,6 +12,7 @@ static Boolean gShowFPS = 1;
 static unsigned long gProfileFrames;
 static Boolean gProfileUncapped;
 static char gProfileLabel[32] = "default";
+static char gAutotestScript[32];
 
 static char *Trim(char *text)
 {
@@ -121,6 +122,10 @@ void JA2OptionsLoad(void)
             strncpy(gProfileLabel, value, sizeof(gProfileLabel) - 1);
             gProfileLabel[sizeof(gProfileLabel) - 1] = 0;
             DebugLog("Options: profile_label=%s", gProfileLabel);
+        } else if (EqualIgnoreCase(key, "autotest")) {
+            strncpy(gAutotestScript, value, sizeof(gAutotestScript) - 1);
+            gAutotestScript[sizeof(gAutotestScript) - 1] = 0;
+            DebugLog("Options: autotest=%s", gAutotestScript);
         }
     }
     fclose(file);
@@ -155,4 +160,10 @@ const char *JA2OptionsProfileLabel(void)
 {
     JA2OptionsLoad();
     return gProfileLabel;
+}
+
+const char *JA2OptionsAutotestScript(void)
+{
+    JA2OptionsLoad();
+    return gAutotestScript;
 }

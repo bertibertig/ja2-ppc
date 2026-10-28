@@ -1,0 +1,24 @@
+# Shell smoke test: logo -> main menu -> credits -> back -> difficulty -> back.
+# Run: tools/machw.py autotest tests/autotest/smoke.txt --set skip_intros=1
+timeout 180
+wait 6000
+expect main
+shot menu
+move 320 400
+wait 500
+shot menu_hover_credits
+click 320 400
+wait 3000
+expect credits
+shot credits
+key Escape
+wait 1500
+expect main
+click 320 290
+wait 2000
+expect difficulty
+shot difficulty
+key Escape
+wait 1500
+expect main
+quit

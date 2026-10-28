@@ -25,6 +25,8 @@ endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SDL2Classic.cmake)
 
 add_application(JA2PPC
+    ja2_autotest.c
+    ja2_autotest.h
     ja2_mac.c
     ja2_mac_internal.h
     ja2_ppc_text.c
