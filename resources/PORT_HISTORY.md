@@ -200,27 +200,27 @@ https://github.com/bertibertig/ja2-ppc
 
 Relevant commits, oldest to newest:
 
-- `9838837` Add German Retro68 PPC port target
-- `a9e3c72` Document Retro68 port build variants
-- `da4b5bb` Add reusable PPC SLF reader
-- `9a2bdef` Add German main menu controls
-- `404e269` Fix debug window update recursion
-- `5472ce5` Log QuickDraw offscreen failures
-- `de9c99f` Increase classic Mac application memory
-- `a4e933f` Cache rendered German menu background
-- `75967e8` Render STI data through QuickDraw palette
-- `ec7c66a` Add direct QuickDraw image fallback
-- `6a59fec` Request 16-bit classic Mac display
-- `a3120c1` Render menu image in 16-bit offscreen buffer
-- `dc0a455` Copy menu image to color window pixmap
-- `4b5c654` Handle case variants in SLF archives
-- `bcd91e8` Handle mixed-case JA2 archive names
-- `2fb6fa1` Write menu pixels to native 16-bit framebuffer
-- `01cbc39` Restore safe classic window rendering
-- `8a97ef2` Map menu framebuffer to movable window
-- `9a48012` Fix RGB555 byte order and blit origin
-- `c0d3f25` Handle classic Mac window dragging
-- `ce8611f` Apply documented classic Color QuickDraw blit
+- `bcffb91` Add German Retro68 PPC port target
+- `211a281` Document Retro68 port build variants
+- `f7a8c4b` Add reusable PPC SLF reader
+- `4477465` Add German main menu controls
+- `8142414` Fix debug window update recursion
+- `e77e1d5` Log QuickDraw offscreen failures
+- `8aa4067` Increase classic Mac application memory
+- `a35fc34` Cache rendered German menu background
+- `e2f4537` Render STI data through QuickDraw palette
+- `812de19` Add direct QuickDraw image fallback
+- `ff0f1f6` Request 16-bit classic Mac display
+- `d26f98b` Render menu image in 16-bit offscreen buffer
+- `ade295f` Copy menu image to color window pixmap
+- `ebc0eaf` Handle case variants in SLF archives
+- `f9cefc9` Handle mixed-case JA2 archive names
+- `07d2582` Write menu pixels to native 16-bit framebuffer
+- `c72f7d7` Restore safe classic window rendering
+- `f106792` Map menu framebuffer to movable window
+- `76e140b` Fix RGB555 byte order and blit origin
+- `3f7e5a3` Handle classic Mac window dragging
+- `58446a0` Apply documented classic Color QuickDraw blit
 
 The later renderer corrections may supersede earlier experiments; inspect the
 current source and the most recent commit before relying on this list.
