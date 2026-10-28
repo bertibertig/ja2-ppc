@@ -7,7 +7,7 @@ set -euo pipefail
 # boot. After the run, debug log and profiler CSV are copied back out.
 # Emulator results never replace the real-hardware test (mac-hw-test skill).
 #
-#   tools/os9-emu.sh [prepare|deploy|run|collect|all|reset]
+#   tools/os9-emu.sh [prepare|deploy|run|collect|all|reset|install|gui]
 #
 # Engines (EMU_ENGINE):
 #   dingus  DingusPPC, Beige G3 (pmg3dt), Old World ROM, Mac OS 9.1 image
@@ -26,6 +26,13 @@ DINGUS_BIN="${DINGUS_BIN:-$DINGUS_ROOT/build/bin/dingusppc}"
 DINGUS_BOOTROM="${DINGUS_BOOTROM:-$DINGUS_ROOT/build/bin/1997-11 - 78F57389 - Power Mac G3 (v3).ROM}"
 QEMU_BIN="${QEMU_BIN:-qemu-system-ppc}"
 EMU_SCREENSHOTS="${EMU_SCREENSHOTS:-20}"
+INSTALL_CD="${EMU_INSTALL_CD:-/path/to/media/Mac OS/OS 9/Mac OS D-9.2.2 iMac CD.iso}"
+# Mirror the PowerBook G3 Lombard test machine as far as mac99 allows:
+# G3 (750, no AltiVec), PMU, 384 MB, 1024x768 at 16-bit (the LCD panel).
+# Not reproducible: 333 MHz clock, ATI Rage LT Pro (QEMU VGA instead),
+# internal ADB keyboard/trackpad (USB devices instead; Lombard has USB too).
+QEMU_MACHINE=(-M mac99,via=pmu -cpu 750 -m 384 -g 1024x768x16
+    -device usb-kbd -device usb-mouse)
 
 case "$ENGINE" in
     dingus) BASE_IMAGE="${EMU_BASE_IMAGE:-$VM_DIR/Powermac G3/macos91.img}" ;;
@@ -134,9 +141,8 @@ run_qemu() {
     local monitor="$WORK_DIR/qemu-monitor.sock" pid shot interval
     command -v "$QEMU_BIN" >/dev/null || die "$QEMU_BIN not installed (pacman -S qemu-system-ppc)"
     rm -f "$monitor"
-    "$QEMU_BIN" -M mac99,via=pmu -m 512 -boot c \
+    "$QEMU_BIN" "${QEMU_MACHINE[@]}" -boot c \
         -drive "file=$WORK_IMAGE,format=raw,media=disk" \
-        -device usb-kbd -device usb-mouse -g 800x600x32 \
         -display "${QEMU_DISPLAY:-none}" -monitor "unix:$monitor,server,nowait" \
         >"$OUT_DIR/emulator.log" 2>&1 &
     pid=$!
@@ -171,6 +177,38 @@ run() {
     esac
 }
 
+# Interactive: boot the Mac OS install CD with the QEMU base image attached so
+# the user can initialize it (Mac OS Standard/HFS, which hfsutils can write)
+# and install Mac OS. Creates an empty 4 GB base image if none exists.
+install_os() {
+    [[ -f "$INSTALL_CD" ]] || die "install CD not found: $INSTALL_CD"
+    mkdir -p "$(dirname "$BASE_IMAGE")"
+    [[ -f "$BASE_IMAGE" ]] || truncate -s 4G "$BASE_IMAGE"
+    run_qemu_gui -boot d \
+        -drive "file=$INSTALL_CD,format=raw,media=cdrom,readonly=on"
+}
+
+# Interactive boot of the base image (no CD), for one-off guest settings.
+# Delete the working copy afterwards ('reset') so tests pick the change up.
+gui() {
+    [[ -f "$BASE_IMAGE" ]] || die "base OS image not found: $BASE_IMAGE"
+    run_qemu_gui -boot c
+}
+
+# The guest only has a relative USB mouse, so QEMU must lock the pointer.
+# Under KDE Wayland the GTK UI loses the pointer (natively and via XWayland);
+# the SDL UI (qemu-ui-sdl) locks it properly, so prefer it when installed.
+run_qemu_gui() {
+    local display=gtk,grab-on-hover=on
+    [[ "$ENGINE" == qemu ]] || die "install/gui need EMU_ENGINE=qemu"
+    command -v "$QEMU_BIN" >/dev/null || die "$QEMU_BIN not installed (pacman -S qemu-system-ppc)"
+    [[ -f /usr/lib/qemu/ui-sdl.so ]] && display=sdl
+    "$QEMU_BIN" "${QEMU_MACHINE[@]}" "$@" \
+        -drive "file=$BASE_IMAGE,format=raw,media=disk" \
+        -display "${QEMU_DISPLAY:-$display}" \
+        -monitor "unix:$WORK_DIR/qemu-install.sock,server,nowait"
+}
+
 collect() {
     local folder file
     mkdir -p "$OUT_DIR"
@@ -195,5 +233,7 @@ case "${1:-all}" in
     collect) collect ;;
     all) prepare; deploy; run; collect ;;
     reset) rm -f "$WORK_IMAGE" "$DATA_STAMP"; prepare ;;
-    *) die "usage: $0 [prepare|deploy|run|collect|all|reset]" ;;
+    install) install_os ;;
+    gui) gui ;;
+    *) die "usage: $0 [prepare|deploy|run|collect|all|reset|install|gui]" ;;
 esac
