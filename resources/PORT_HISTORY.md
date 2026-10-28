@@ -242,6 +242,37 @@ Remaining work:
 - Connect initialization to intro completion and `MAINMENU_SCREEN`
 - Port audio, timers, file paths, save games, and remaining Win32 APIs
 
+## Test Environments (2026-10-28)
+
+Acceptance and performance numbers come only from the real PowerBook G3
+Lombard (Mac OS 9.2.2). Two emulators are set up for functional smoke tests
+through `tools/os9-emu.sh` (see the `os9-emu` skill):
+
+- QEMU mac99 with German Mac OS 9.2.2, hardware matched to the PowerBook
+  (G3 750, 384 MB, 1024x768x16). Base image
+  `$EMU_WORK_DIR/base/macos922.img`.
+- DingusPPC as a Power Mac 7600/120 (604, 64 MB, 2 MB VRAM, 800x600) with
+  German Mac OS 8.5 plus the 8.6 update: the minimum hardware target from
+  AGENTS.md. Base image `$EMU_WORK_DIR/base86/macos86.img` with ROM and
+  PRAM/NVRAM next to it.
+
+The OS images, ROMs and PRAM files live outside the repository and are never
+committed (copyrighted Apple software, several GB). Both images must stay
+HFS Standard, because the deploy step writes them with hfsutils. To
+recreate them, follow the os9-emu skill.
+
+Failed approaches, do not repeat:
+
+- DingusPPC Beige G3 (`pmg3dt`) with Mac OS 9.1 stops with "Busfehler (1)"
+  at the welcome screen, also with all ATI extensions disabled.
+- Mac OS 8.5/8.6 does not boot in QEMU: OpenBIOS finds no bootable `tbxi`
+  on the 8.5 CD, nor on an 8.6 disk with a New World `Mac OS ROM` (1.6,
+  2.5.1) copied in and the boot folder set.
+- No PowerPC Mac emulator offers 3D acceleration (RAVE/OpenGL). JA2 does
+  not need it.
+- Never capture the full host screen for emulator screenshots: use QEMU's
+  monitor `screendump` or the DingusPPC window only.
+
 ## Working Method
 
 Keep German debug builds as the default while diagnosing. For every meaningful
